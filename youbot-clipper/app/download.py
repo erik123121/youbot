@@ -11,17 +11,21 @@ from typing import Optional
 
 import yt_dlp
 
-# Prefer a reasonably sized mp4 so ffmpeg has no container surprises.
-_FORMAT = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best"
+# Prefer <=1080 but never hard-fail on container/codec: take the best video of
+# any codec + best audio, and let ffmpeg remux to mp4. The trailing fallbacks
+# ("bv*+ba", "b") guarantee we pick something whenever any format exists.
+_FORMAT = (
+    "bestvideo[height<=1080]+bestaudio/best[height<=1080]/"
+    "bestvideo+bestaudio/best/bv*+ba/b"
+)
 
 
 def _download(url: str, out_path: Path, with_audio: bool = True) -> Optional[Path]:
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fmt = _FORMAT if with_audio else "bestvideo[height<=1080][ext=mp4]/best[ext=mp4]/best"
     opts = {
         "quiet": True,
         "no_warnings": True,
-        "format": fmt,
+        "format": _FORMAT,
         "merge_output_format": "mp4",
         "outtmpl": str(out_path.with_suffix("")) + ".%(ext)s",
         "noplaylist": True,

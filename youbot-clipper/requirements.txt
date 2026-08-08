@@ -2,4 +2,6 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 jinja2==3.1.5
 aiofiles==24.1.0
-yt-dlp==2025.1.26
+# Unpinned on purpose: YouTube breaks older yt-dlp releases often, so each
+# image build should grab the newest extractor code.
+yt-dlp
