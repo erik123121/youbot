@@ -1,5 +1,5 @@
 name: Youbot Shorts Clipper
-version: "0.1.1"
+version: "0.1.2"
 slug: youbot_clipper
 description: Turns trending YouTube videos into vertical Shorts with GTA gameplay on the bottom half.
 url: https://github.com/erik123121/youbot/tree/main/youbot-clipper
@@ -31,6 +31,8 @@ options:
   clip_seconds: 35
   output_dir: "/media/youbot"
   max_source_minutes: 30
+  auto_update_addon: true
+  auto_update_ytdlp: true
 schema:
   gameplay_url: url
   trending_region: str
@@ -38,3 +40,5 @@ schema:
   clip_seconds: int(5,40)
   output_dir: str
   max_source_minutes: int(1,240)
+  auto_update_addon: bool
+  auto_update_ytdlp: bool

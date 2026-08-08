@@ -34,6 +34,20 @@ Press **Start** and the add-on:
 | `clip_seconds` | `35` | Length of the moment (max 40). |
 | `output_dir` | `/media/youbot` | Where finished Shorts are saved. `/media/...` makes them appear in the HA Media browser. |
 | `max_source_minutes` | `30` | Skip source videos longer than this (avoids live streams / very long uploads). |
+| `auto_update_addon` | `true` | On each start, pull the latest app code from the repo's `main` branch and run that. Lets you apply code fixes by just **Restarting** the add-on instead of using HA's Update button. |
+| `auto_update_ytdlp` | `true` | On each start, upgrade yt-dlp to the latest release (YouTube frequently breaks older versions). |
+
+## Updating
+
+Two ways to get new code:
+
+* **Just restart** the add-on — with `auto_update_addon` on (default), it fetches
+  the latest `app/` code from GitHub `main` at startup. Best for code/logic fixes.
+* **HA Update button** — needed only when `config.yaml` itself changes (new
+  options, ports, version, icon), since Home Assistant reads that at build time.
+
+Both self-updates are best-effort: if the machine is offline, the bundled
+version is used and startup continues normally.
 
 ## Notes
 
