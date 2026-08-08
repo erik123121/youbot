@@ -39,7 +39,11 @@ def main(url: str) -> int:
     try:
         try:
             with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-                tar.extractall(tmp)  # trusted source: our own repo tarball
+                # filter="data" is the safe default and silences the 3.14 warning.
+                try:
+                    tar.extractall(tmp, filter="data")
+                except TypeError:  # older Python without the filter kwarg
+                    tar.extractall(tmp)
         except Exception as exc:  # noqa: BLE001
             return fail(f"extract failed: {exc}")
 
@@ -54,18 +58,11 @@ def main(url: str) -> int:
         if not (new_app / "main.py").is_file():
             return fail("downloaded app/ looks incomplete (no main.py)")
 
-        # Atomic-ish swap: stage next to the live dir, then rename.
-        staging = APP_DIR.parent / "app.new"
-        backup = APP_DIR.parent / "app.bak"
-        for stale in (staging, backup):
-            if stale.exists():
-                shutil.rmtree(stale, ignore_errors=True)
-        shutil.copytree(new_app, staging)
-
-        if APP_DIR.exists():
-            APP_DIR.rename(backup)
-        staging.rename(APP_DIR)
-        shutil.rmtree(backup, ignore_errors=True)
+        # Copy the new code in place, file by file. copytree(dirs_exist_ok=True)
+        # never renames directories, so it works even when /app spans a device
+        # boundary (an os.rename there fails with EXDEV). This runs before the
+        # server starts, so there are no files in use.
+        shutil.copytree(new_app, APP_DIR, dirs_exist_ok=True)
 
         # Refresh requirements so run.sh can install any new deps.
         new_req = src / "requirements.txt"
