@@ -78,9 +78,9 @@ class Pipeline:
                 raise RuntimeError("No popular videos found.")
             st.set("trending", f"Found {len(ids)} candidates.")
 
-            use_ai = bool(s.gemini_api_key)
+            # Pick the first popular video that has a usable transcript.
             chosen_info = None
-            chosen_moment = None
+            chosen_segments = None
             max_seconds = s.max_source_minutes * 60
             for idx, vid in enumerate(ids, start=1):
                 st.set("scanning", f"Reading transcript ({idx}/{len(ids)})…")
@@ -92,30 +92,29 @@ class Pipeline:
                     continue  # skip live/very long videos
                 if not segments:
                     continue  # no captions -> can't read the dialogue, skip
-
-                moment = None
-                if use_ai:
-                    st.set("ai", f"Asking Gemini for the best moment ({idx}/{len(ids)})…")
-                    moment, err = ai_pick.pick_moment(
-                        segments, s.gemini_api_key, s.gemini_model, s.clip_seconds
-                    )
-                    if err:
-                        st.log.append(f"  Gemini: {err}")
-                # Fall back to the on-device scorer if AI is off/unavailable.
-                if moment is None:
-                    moment = moments.pick_best_span(segments, s.clip_seconds)
-                if moment is None:
-                    continue
-
                 chosen_info = info
-                chosen_moment = moment
+                chosen_segments = segments
                 break
 
-            if not chosen_info or not chosen_moment:
+            if not chosen_info or not chosen_segments:
                 raise RuntimeError(
                     "No popular video had usable captions to pick a moment from. "
                     "Try again later."
                 )
+
+            # Choose the moment: one Gemini call per run, heuristic as fallback.
+            chosen_moment = None
+            if s.gemini_api_key:
+                st.set("ai", "Asking Gemini for the best moment…")
+                chosen_moment, err = ai_pick.pick_moment(
+                    chosen_segments, s.gemini_api_key, s.gemini_model, s.clip_seconds
+                )
+                if err:
+                    st.log.append(f"  Gemini unavailable ({err}); using on-device scorer.")
+            if chosen_moment is None:
+                chosen_moment = moments.pick_best_span(chosen_segments, s.clip_seconds)
+            if chosen_moment is None:
+                raise RuntimeError("Could not pick a moment from the transcript.")
             st.set("scanning", f"Picked moment: {chosen_moment.reason}")
 
             vinfo = moments.video_info_from(chosen_info)

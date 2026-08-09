@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.error
 import urllib.request
 from typing import List, Optional, Tuple
@@ -66,6 +67,12 @@ def _prompt(transcript: str, duration: float, clip_seconds: int) -> str:
     )
 
 
+def _retry_delay(body: str) -> Optional[float]:
+    """Pull Google's suggested retryDelay (e.g. '7s') out of a 429 body."""
+    m = re.search(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"', body)
+    return float(m.group(1)) if m else None
+
+
 def _call_gemini(api_key: str, model: str, prompt: str) -> Tuple[Optional[dict], Optional[str]]:
     url = _ENDPOINT.format(model=model) + f"?key={api_key}"
     body = json.dumps(
@@ -77,21 +84,35 @@ def _call_gemini(api_key: str, model: str, prompt: str) -> Tuple[Optional[dict],
             },
         }
     ).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = ""
+
+    payload = None
+    for attempt in range(2):  # one retry, mainly for transient 429s
+        req = urllib.request.Request(
+            url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        )
         try:
-            detail = exc.read().decode("utf-8")[:200]
-        except Exception:
-            pass
-        return None, f"HTTP {exc.code} {detail}".strip()
-    except Exception as exc:  # noqa: BLE001
-        return None, f"request failed: {exc}"
+            with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8")
+            except Exception:
+                pass
+            if exc.code == 429:
+                delay = _retry_delay(detail) or 6.0
+                if attempt == 0 and delay <= 15:
+                    time.sleep(delay)
+                    continue
+                return None, "quota/rate limit hit (HTTP 429) — free-tier limit reached"
+            snippet = " ".join(detail.split())[:140]
+            return None, f"HTTP {exc.code}: {snippet}"
+        except Exception as exc:  # noqa: BLE001
+            return None, f"request failed: {exc}"
+
+    if payload is None:
+        return None, "no response"
 
     try:
         text = payload["candidates"][0]["content"]["parts"][0]["text"]
