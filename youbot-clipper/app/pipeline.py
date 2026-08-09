@@ -72,34 +72,38 @@ class Pipeline:
             if not gameplay:
                 raise RuntimeError("Could not download/cache the gameplay video.")
 
-            st.set("trending", "Fetching trending videos…")
+            st.set("trending", "Finding popular videos…")
             ids = trending.get_trending_ids(s.trending_region, s.candidate_count)
             if not ids:
-                raise RuntimeError("No trending videos found.")
-            st.set("trending", f"Found {len(ids)} trending candidates.")
+                raise RuntimeError("No popular videos found.")
+            st.set("trending", f"Found {len(ids)} candidates.")
 
             chosen_info = None
             chosen_moment = None
             max_seconds = s.max_source_minutes * 60
             for idx, vid in enumerate(ids, start=1):
-                st.set("scanning", f"Checking most-replayed data ({idx}/{len(ids)})…")
-                info = moments.fetch_info(vid)
+                st.set("scanning", f"Reading transcript & scoring ({idx}/{len(ids)})…")
+                info, segments = moments.fetch_info_and_transcript(vid, s.work_dir)
                 if not info:
                     continue
                 dur = float(info.get("duration") or 0.0)
                 if dur <= 0 or dur > max_seconds:
                     continue  # skip live/very long videos
-                moment = moments.best_moment(info, s.clip_seconds)
+                if not segments:
+                    continue  # no captions -> can't read the dialogue, skip
+                moment = moments.pick_best_span(segments, s.clip_seconds)
                 if moment is None:
-                    continue  # no replay data -> skip (most-replayed only)
+                    continue
                 chosen_info = info
                 chosen_moment = moment
                 break
 
             if not chosen_info or not chosen_moment:
                 raise RuntimeError(
-                    "No trending video exposed 'most replayed' data. Try again later."
+                    "No popular video had usable captions to pick a moment from. "
+                    "Try again later."
                 )
+            st.set("scanning", f"Picked moment ({chosen_moment.reason}).")
 
             vinfo = moments.video_info_from(chosen_info)
             st.set("download", f"Downloading: {vinfo.title[:60]}")
@@ -133,7 +137,8 @@ class Pipeline:
                     "source_id": vinfo.id,
                     "moment_start": chosen_moment.start,
                     "moment_end": chosen_moment.end,
-                    "peak_replay": chosen_moment.peak,
+                    "moment_reason": chosen_moment.reason,
+                    "transcript": chosen_moment.text,
                     "duration": round(chosen_moment.duration, 2),
                     "created_at": datetime.now().isoformat(),
                 },

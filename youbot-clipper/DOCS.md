@@ -12,10 +12,13 @@ gameplay filling the bottom half so there are no black bars.
 Press **Start** and the add-on:
 
 1. Ensures the configured gameplay video is downloaded and cached (once).
-2. Scrapes YouTube's trending feed (no API key).
-3. For each trending video, reads YouTube's "most replayed" graph and picks the
-   single highest-replay moment, building a window of up to `clip_seconds`.
-   Videos with no replay data are skipped.
+2. Finds currently-popular videos by searching big categories (music, gaming,
+   sports, etc.) filtered to the last week — no API key.
+3. For each candidate it downloads the timed captions and scores 20–`clip_seconds`
+   windows of dialogue for engagement (reactions like `[laughter]`, exclamations,
+   questions, high-energy words, emphasis, speech density), avoiding intros/outros
+   and sponsor reads. The best span is snapped to caption boundaries so it never
+   cuts mid-sentence. Videos with no captions are skipped. Free and on-device.
 4. Downloads that video and renders the split-screen Short with ffmpeg.
 5. Saves the `.mp4` (plus a thumbnail and a metadata `.json`) to `output_dir`.
 
