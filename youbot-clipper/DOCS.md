@@ -14,14 +14,14 @@ Press **Start** and the add-on:
 1. Ensures the configured gameplay video is downloaded and cached (once).
 2. Finds currently-popular videos by searching big categories (music, gaming,
    sports, etc.) filtered to the last week — no API key.
-3. For each candidate it downloads the timed captions and scores 20–`clip_seconds`
-   windows of dialogue for engagement (reactions like `[laughter]`, exclamations,
-   questions, high-energy words, emphasis, speech density), avoiding intros/outros
-   and sponsor reads. The best span is snapped to caption boundaries so it never
-   cuts mid-sentence. Videos with no captions are skipped. Free and on-device.
+3. For each candidate it downloads the timed transcript and asks Google Gemini
+   (free tier) to choose the single most engaging 20–`clip_seconds` span. If no
+   Gemini key is set, or the call fails, it falls back to an on-device scorer
+   (reactions, exclamations, questions, high-energy words, speech density).
+   Videos with no captions are skipped.
 4. Downloads that video and renders the Short with ffmpeg: a 50/50 split
    (clip on top, gameplay on the bottom, both cover-cropped so there are no
-   black bars), with Shorts-style captions burned in from the transcript.
+   black bars).
 5. Saves the `.mp4` (plus a thumbnail and a metadata `.json`) to `output_dir`.
 
 ## Opening the UI
@@ -39,6 +39,8 @@ Press **Start** and the add-on:
 | `clip_seconds` | `35` | Length of the moment (max 40). |
 | `output_dir` | `/media/youbot` | Where finished Shorts are saved. `/media/...` makes them appear in the HA Media browser. |
 | `max_source_minutes` | `30` | Skip source videos longer than this (avoids live streams / very long uploads). |
+| `gemini_api_key` | _(empty)_ | Free Google Gemini API key (from Google AI Studio) used to pick the best moment. Leave empty to use the on-device scorer instead. |
+| `gemini_model` | `gemini-2.0-flash` | Gemini model used for moment selection. |
 | `auto_update_addon` | `true` | On each start, pull the latest app code from the repo's `main` branch and run that. Lets you apply code fixes by just **Restarting** the add-on instead of using HA's Update button. |
 | `auto_update_ytdlp` | `true` | On each start, upgrade yt-dlp to the latest release (YouTube frequently breaks older versions). |
 

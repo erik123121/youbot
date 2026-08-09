@@ -20,6 +20,8 @@ _DEFAULTS = {
     "clip_seconds": 35,
     "output_dir": "/media/youbot",
     "max_source_minutes": 30,
+    "gemini_api_key": "",
+    "gemini_model": "gemini-2.0-flash",
 }
 
 
@@ -31,6 +33,8 @@ class Settings:
     clip_seconds: int
     output_dir: Path
     max_source_minutes: int
+    gemini_api_key: str
+    gemini_model: str
     data_dir: Path
 
     @property
@@ -67,6 +71,9 @@ def load_settings() -> Settings:
         clip_seconds=max(5, min(40, int(raw["clip_seconds"]))),
         output_dir=Path(str(raw["output_dir"])),
         max_source_minutes=int(raw["max_source_minutes"]),
+        gemini_api_key=str(raw.get("gemini_api_key", "")).strip(),
+        gemini_model=str(raw.get("gemini_model", "gemini-2.0-flash")).strip()
+        or "gemini-2.0-flash",
         data_dir=data_dir,
     )
     for d in (settings.output_dir, settings.gameplay_dir, settings.work_dir):

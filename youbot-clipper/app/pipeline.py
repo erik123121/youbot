@@ -11,10 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from . import captions, compose, download, moments, storage, trending
+from . import ai_pick, compose, download, moments, storage, trending
 from .config import Settings
-
-FONTS_DIR = Path(__file__).parent / "assets"
 
 
 @dataclass
@@ -80,12 +78,12 @@ class Pipeline:
                 raise RuntimeError("No popular videos found.")
             st.set("trending", f"Found {len(ids)} candidates.")
 
+            use_ai = bool(s.gemini_api_key)
             chosen_info = None
             chosen_moment = None
-            chosen_segments = []
             max_seconds = s.max_source_minutes * 60
             for idx, vid in enumerate(ids, start=1):
-                st.set("scanning", f"Reading transcript & scoring ({idx}/{len(ids)})…")
+                st.set("scanning", f"Reading transcript ({idx}/{len(ids)})…")
                 info, segments = moments.fetch_info_and_transcript(vid, s.work_dir)
                 if not info:
                     continue
@@ -94,12 +92,23 @@ class Pipeline:
                     continue  # skip live/very long videos
                 if not segments:
                     continue  # no captions -> can't read the dialogue, skip
-                moment = moments.pick_best_span(segments, s.clip_seconds)
+
+                moment = None
+                if use_ai:
+                    st.set("ai", f"Asking Gemini for the best moment ({idx}/{len(ids)})…")
+                    moment, err = ai_pick.pick_moment(
+                        segments, s.gemini_api_key, s.gemini_model, s.clip_seconds
+                    )
+                    if err:
+                        st.log.append(f"  Gemini: {err}")
+                # Fall back to the on-device scorer if AI is off/unavailable.
+                if moment is None:
+                    moment = moments.pick_best_span(segments, s.clip_seconds)
                 if moment is None:
                     continue
+
                 chosen_info = info
                 chosen_moment = moment
-                chosen_segments = segments
                 break
 
             if not chosen_info or not chosen_moment:
@@ -107,30 +116,13 @@ class Pipeline:
                     "No popular video had usable captions to pick a moment from. "
                     "Try again later."
                 )
-            st.set("scanning", f"Picked moment ({chosen_moment.reason}).")
+            st.set("scanning", f"Picked moment: {chosen_moment.reason}")
 
             vinfo = moments.video_info_from(chosen_info)
             st.set("download", f"Downloading: {vinfo.title[:60]}")
             source = download.download_source(vinfo.id, s.work_dir)
             if not source:
                 raise RuntimeError("Failed to download the source video.")
-
-            # Build Shorts-style captions from the clipped transcript.
-            st.set("captions", "Building captions…")
-            cs = chosen_moment.start
-            entries = [
-                (
-                    max(0.0, seg.start - cs),
-                    min(chosen_moment.duration, seg.end - cs),
-                    seg.text,
-                )
-                for seg in chosen_segments
-                if seg.end > cs and seg.start < chosen_moment.end
-            ]
-            ass_path = None
-            if entries:
-                ass_path = s.work_dir / f"{vinfo.id}_caps.ass"
-                captions.build_ass(entries, ass_path, chosen_moment.duration)
 
             st.set("render", "Rendering vertical Short…")
             base = storage.new_basename(vinfo.id)
@@ -141,14 +133,7 @@ class Pipeline:
                 out_path=out_path,
                 clip_start=chosen_moment.start,
                 clip_duration=chosen_moment.duration,
-                ass_path=ass_path,
-                fonts_dir=FONTS_DIR,
             )
-            if ass_path is not None:
-                try:
-                    ass_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
             st.set("thumbnail", "Generating thumbnail…")
             try:

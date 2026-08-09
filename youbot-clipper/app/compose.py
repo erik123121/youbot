@@ -4,7 +4,6 @@ Layout (1080x1920, no black bars): a 50/50 split.
   * Top half: the source clip scaled to *cover* 1080x960 and center-cropped, so
     it fills the top half and reads as the main content.
   * Bottom half: GTA gameplay scaled to *cover* 1080x960 and cropped.
-Optionally, Shorts-style captions from the transcript are burned in.
 
 Only the source clip's audio is kept; gameplay is muted.
 """
@@ -14,7 +13,7 @@ import json
 import random
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Tuple
 
 OUT_W = 1080
 OUT_H = 1920
@@ -24,11 +23,6 @@ TOP_FRACTION = 0.5  # clip occupies the top half
 
 def _even(n: int) -> int:
     return n - (n % 2)
-
-
-def _escape_filter_path(path: str) -> str:
-    """Escape a path for use as a value inside an ffmpeg filtergraph."""
-    return path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
 
 def probe_dimensions(path: Path) -> Tuple[int, int]:
@@ -85,8 +79,6 @@ def render(
     out_path: Path,
     clip_start: float,
     clip_duration: float,
-    ass_path: Optional[Path] = None,
-    fonts_dir: Optional[Path] = None,
 ) -> Path:
     top_h = _even(int(OUT_H * TOP_FRACTION))
     bottom_h = _even(OUT_H - top_h)
@@ -98,14 +90,6 @@ def render(
     # Without fps normalization + setpts, stacking two seeked inputs produces
     # broken timestamps (a file that won't play) and a bloated, slow encode.
     # Both halves scale-to-cover their region and center-crop (no black bars).
-    vchain = "[top][bot]vstack=inputs=2,format=yuv420p"
-    if ass_path is not None:
-        style = _escape_filter_path(str(ass_path))
-        vchain += f",subtitles=filename={style}"
-        if fonts_dir is not None:
-            vchain += f":fontsdir={_escape_filter_path(str(fonts_dir))}"
-    vchain += "[v]"
-
     filtergraph = (
         f"[0:v]scale={OUT_W}:{top_h}:force_original_aspect_ratio=increase,"
         f"crop={OUT_W}:{top_h}:(iw-{OUT_W})/2:(ih-{top_h})/2,"
@@ -113,7 +97,7 @@ def render(
         f"[1:v]scale={OUT_W}:{bottom_h}:force_original_aspect_ratio=increase,"
         f"crop={OUT_W}:{bottom_h}:(iw-{OUT_W})/2:(ih-{bottom_h})/2,"
         f"setsar=1,fps={FPS},setpts=PTS-STARTPTS[bot];"
-        f"{vchain}"
+        f"[top][bot]vstack=inputs=2,format=yuv420p[v]"
     )
     if has_audio:
         filtergraph += ";[0:a]aresample=async=1,asetpts=PTS-STARTPTS[a]"
