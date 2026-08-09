@@ -96,24 +96,83 @@ def video_info_from(info: dict) -> VideoInfo:
 
 
 # --------------------------------------------------------------- transcript
+_CHUNK_WORDS = 5       # words per caption line (Shorts style)
+_CHUNK_MAX_S = 2.4     # ...or this long, whichever comes first
+
+
+def _event_words(event: dict) -> List[Tuple[float, str]]:
+    """Extract (abs_time, word) tokens from one json3 event.
+
+    Uses per-word tOffsetMs when present (auto-captions); otherwise spreads the
+    words evenly across the event's duration (manual captions).
+    """
+    segs = event.get("segs") or []
+    base = float(event.get("tStartMs", 0)) / 1000.0
+    dur = float(event.get("dDurationMs", 0)) / 1000.0
+    tokens = [(s.get("utf8", "") or "").strip() for s in segs]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return []
+    has_offsets = any("tOffsetMs" in s for s in segs)
+    words: List[Tuple[float, str]] = []
+    if has_offsets:
+        for s in segs:
+            w = (s.get("utf8", "") or "").strip()
+            if w:
+                words.append((base + float(s.get("tOffsetMs", 0)) / 1000.0, w))
+    else:
+        n = len(tokens)
+        step = (dur / n) if (dur > 0 and n > 0) else 0.3
+        for i, w in enumerate(tokens):
+            words.append((base + i * step, w))
+    return words
+
+
 def _parse_json3(path: Path) -> List[Segment]:
     try:
         data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
     except (json.JSONDecodeError, OSError):
         return []
-    segments: List[Segment] = []
-    last_text = ""
+
+    # 1) Build a de-rolled word stream. YouTube auto-captions re-send each line
+    #    with a growing tail, so we merge each event onto the running stream by
+    #    dropping the longest prefix that already appears as its suffix.
+    stream: List[Tuple[float, str]] = []
     for event in data.get("events", []) or []:
-        segs = event.get("segs")
-        if not segs:
+        ev = _event_words(event)
+        if not ev:
             continue
-        text = "".join(s.get("utf8", "") for s in segs).strip()
-        if not text or text == last_text:  # drop blanks and rolling duplicates
-            continue
-        start = float(event.get("tStartMs", 0)) / 1000.0
-        dur = float(event.get("dDurationMs", 0)) / 1000.0
-        segments.append(Segment(start=start, end=start + max(dur, 0.1), text=text))
-        last_text = text
+        toks = [w.lower() for _, w in ev]
+        max_k = min(len(toks), len(stream))
+        overlap = 0
+        for k in range(max_k, 0, -1):
+            if [w.lower() for _, w in stream[-k:]] == toks[:k]:
+                overlap = k
+                break
+        stream.extend(ev[overlap:])
+
+    if not stream:
+        return []
+
+    # 2) Re-chunk the clean stream into short, non-overlapping caption groups.
+    segments: List[Segment] = []
+    i = 0
+    n = len(stream)
+    while i < n:
+        start = stream[i][0]
+        j = i
+        picked: List[str] = []
+        while j < n and len(picked) < _CHUNK_WORDS and (stream[j][0] - start) <= _CHUNK_MAX_S:
+            picked.append(stream[j][1])
+            j += 1
+        if j == i:  # safety: always advance
+            picked = [stream[i][1]]
+            j = i + 1
+        text = " ".join(picked).strip(" ,.-")
+        end = stream[j][0] if j < n else start + 1.5
+        if text and end > start:
+            segments.append(Segment(start=round(start, 2), end=round(end, 2), text=text))
+        i = j
     return segments
 
 
