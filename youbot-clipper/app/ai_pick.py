@@ -49,18 +49,20 @@ def _build_transcript(segments: List[Segment], max_chars: int = _MAX_TRANSCRIPT_
     return text
 
 
-def _prompt(transcript: str, duration: float, clip_seconds: int) -> str:
+def _prompt(transcript: str, duration: float, clip_seconds: int, max_count: int) -> str:
     hi = min(_MAX_SPAN, float(clip_seconds))
     return (
         "Below is a timestamped transcript of a video; each line starts with its "
         "start time in seconds in square brackets.\n\n"
-        f"Pick the SINGLE most engaging, self-contained moment for a vertical "
-        f"Short. It must be a contiguous span between {MIN_SPAN:.0f} and {hi:.0f} "
-        "seconds long. Favor a strong hook, payoff, humor, surprise, or high "
-        "emotion. Avoid intros, outros, and sponsor/ad reads. The span must lie "
-        f"within the video, which is {duration:.0f} seconds long.\n\n"
-        'Respond with ONLY JSON: '
-        '{"start_seconds": number, "end_seconds": number, "reason": "short phrase"}\n\n'
+        f"Find EVERY genuinely engaging, self-contained moment worth turning into "
+        f"a vertical Short — up to {max_count} of them. Each must be a contiguous "
+        f"span between {MIN_SPAN:.0f} and {hi:.0f} seconds long, and the spans must "
+        "NOT overlap each other. Favor strong hooks, payoffs, humor, surprise, or "
+        "high emotion. Only include moments that are actually good — fewer is fine. "
+        "Skip intros, outros, and sponsor/ad reads. Every span must lie within the "
+        f"video, which is {duration:.0f} seconds long. Order them best first.\n\n"
+        'Respond with ONLY JSON: {"clips": [{"start_seconds": number, '
+        '"end_seconds": number, "reason": "short phrase"}]}\n\n'
         "TRANSCRIPT:\n" + transcript
     )
 
@@ -78,7 +80,7 @@ def _call_openai(api_key: str, model: str, prompt: str) -> Tuple[Optional[dict],
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.4,
-            "max_tokens": 120,
+            "max_tokens": 500,
             "response_format": {"type": "json_object"},
         }
     ).encode("utf-8")
@@ -145,50 +147,73 @@ def _snap(segments: List[Segment], start: float, end: float) -> Tuple[float, flo
     return snapped_start, snapped_end
 
 
-def pick_moment(
-    segments: List[Segment], api_key: str, model: str, clip_seconds: int
-) -> Tuple[Optional[Moment], Optional[str]]:
-    if not segments:
-        return None, "no transcript"
-    duration = segments[-1].end
-    transcript = _build_transcript(segments)
-    prompt = _prompt(transcript, duration, clip_seconds)
-
-    data, err = _call_openai(api_key, model, prompt)
-    if err:
-        return None, err
-    try:
-        start = float(data["start_seconds"])
-        end = float(data["end_seconds"])
-    except (KeyError, TypeError, ValueError):
-        return None, "missing start/end"
-    reason = str(data.get("reason", "AI pick")).strip()[:120] or "AI pick"
-
-    # Clamp + enforce the 20..40s length rules.
+def _finalize(
+    segments: List[Segment], duration: float, start: float, end: float, reason: str
+) -> Optional[Moment]:
+    """Clamp/snap one span to the 20..40s rules; None if it can't be made valid."""
     start = max(0.0, min(start, duration))
     end = max(0.0, min(end, duration))
     if end <= start:
         end = min(start + MIN_SPAN, duration)
     start, end = _snap(segments, start, end)
-    span = end - start
-    if span < MIN_SPAN:
+    if end - start < MIN_SPAN:
         end = min(start + MIN_SPAN, duration)
         start = max(0.0, end - MIN_SPAN)
     if end - start > _MAX_SPAN:
         end = start + _MAX_SPAN
     if end - start < MIN_SPAN:
-        return None, "span too short after clamping"
-
+        return None
     clip_text = " ".join(
         seg.text for seg in segments if seg.end > start and seg.start < end
     )[:500]
-    return (
-        Moment(
-            start=round(start, 2),
-            end=round(end, 2),
-            score=0.0,
-            reason=reason,
-            text=clip_text,
-        ),
-        None,
+    return Moment(
+        start=round(start, 2),
+        end=round(end, 2),
+        score=0.0,
+        reason=(reason.strip()[:120] or "AI pick"),
+        text=clip_text,
     )
+
+
+def pick_moments(
+    segments: List[Segment], api_key: str, model: str, clip_seconds: int, max_count: int
+) -> Tuple[List[Moment], Optional[str]]:
+    """Return up to max_count non-overlapping engaging spans (best-first)."""
+    if not segments:
+        return [], "no transcript"
+    duration = segments[-1].end
+    transcript = _build_transcript(segments)
+    prompt = _prompt(transcript, duration, clip_seconds, max_count)
+
+    data, err = _call_openai(api_key, model, prompt)
+    if err:
+        return [], err
+
+    raw = data.get("clips")
+    if not isinstance(raw, list):
+        return [], "no clips array in response"
+
+    chosen: List[Moment] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            start = float(item["start_seconds"])
+            end = float(item["end_seconds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        moment = _finalize(
+            segments, duration, start, end, str(item.get("reason", "AI pick"))
+        )
+        if moment is None:
+            continue
+        if any(moment.start < c.end and moment.end > c.start for c in chosen):
+            continue  # drop overlaps with an already-accepted clip
+        chosen.append(moment)
+        if len(chosen) >= max_count:
+            break
+
+    if not chosen:
+        return [], "no valid clips returned"
+    chosen.sort(key=lambda m: m.start)  # chronological output
+    return chosen, None

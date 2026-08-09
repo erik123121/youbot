@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from . import storage
+from . import blacklist, storage
 from .config import load_settings
 from .pipeline import Pipeline
 
@@ -61,6 +61,16 @@ def start():
 @app.get("/api/clips")
 def clips():
     return {"clips": storage.list_clips(settings.output_dir)}
+
+
+@app.get("/api/blacklist")
+def blacklist_info():
+    return {"count": blacklist.count(settings.data_dir)}
+
+
+@app.post("/api/blacklist/reset")
+def blacklist_reset():
+    return {"ok": True, "cleared": blacklist.clear(settings.data_dir)}
 
 
 @app.get("/thumbs/{filename}")

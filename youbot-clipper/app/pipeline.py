@@ -11,8 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from . import ai_pick, compose, download, moments, storage, trending
+from . import ai_pick, blacklist, compose, download, moments, storage, trending
 from .config import Settings
+
+MAX_SHORTS_PER_VIDEO = 8
 
 
 @dataclass
@@ -76,13 +78,16 @@ class Pipeline:
             ids = trending.get_trending_ids(s.trending_region, s.candidate_count)
             if not ids:
                 raise RuntimeError("No popular videos found.")
-            st.set("trending", f"Found {len(ids)} candidates.")
+            seen = blacklist.load(s.data_dir)
+            st.set("trending", f"Found {len(ids)} candidates ({len(seen)} already used).")
 
-            # Pick the first popular video that has a usable transcript.
+            # Pick the first NEW popular video that has a usable transcript.
             chosen_info = None
             chosen_segments = None
             max_seconds = s.max_source_minutes * 60
             for idx, vid in enumerate(ids, start=1):
+                if vid in seen:
+                    continue  # already turned into shorts before
                 st.set("scanning", f"Reading transcript ({idx}/{len(ids)})…")
                 info, segments = moments.fetch_info_and_transcript(vid, s.work_dir)
                 if not info:
@@ -98,24 +103,27 @@ class Pipeline:
 
             if not chosen_info or not chosen_segments:
                 raise RuntimeError(
-                    "No popular video had usable captions to pick a moment from. "
-                    "Try again later."
+                    "No new popular video with usable captions was found "
+                    "(everything found was already used). Try again later."
                 )
 
-            # Choose the moment: one Gemini call per run, heuristic as fallback.
-            chosen_moment = None
+            # Find ALL good moments: one OpenAI call per run, heuristic fallback.
+            picked = []
             if s.openai_api_key:
-                st.set("ai", "Asking OpenAI for the best moment…")
-                chosen_moment, err = ai_pick.pick_moment(
-                    chosen_segments, s.openai_api_key, s.openai_model, s.clip_seconds
+                st.set("ai", "Asking OpenAI for the best moments…")
+                picked, err = ai_pick.pick_moments(
+                    chosen_segments, s.openai_api_key, s.openai_model,
+                    s.clip_seconds, MAX_SHORTS_PER_VIDEO,
                 )
                 if err:
                     st.log.append(f"  OpenAI unavailable ({err}); using on-device scorer.")
-            if chosen_moment is None:
-                chosen_moment = moments.pick_best_span(chosen_segments, s.clip_seconds)
-            if chosen_moment is None:
-                raise RuntimeError("Could not pick a moment from the transcript.")
-            st.set("scanning", f"Picked moment: {chosen_moment.reason}")
+            if not picked:
+                picked = moments.pick_best_spans(
+                    chosen_segments, s.clip_seconds, MAX_SHORTS_PER_VIDEO
+                )
+            if not picked:
+                raise RuntimeError("Could not find any good moments in the transcript.")
+            st.set("scanning", f"Found {len(picked)} moment(s) to clip.")
 
             vinfo = moments.video_info_from(chosen_info)
             st.set("download", f"Downloading: {vinfo.title[:60]}")
@@ -123,47 +131,62 @@ class Pipeline:
             if not source:
                 raise RuntimeError("Failed to download the source video.")
 
-            st.set("render", "Rendering vertical Short…")
-            base = storage.new_basename(vinfo.id)
-            out_path = s.output_dir / f"{base}.mp4"
-            compose.render(
-                source_path=source,
-                gameplay_path=gameplay,
-                out_path=out_path,
-                clip_start=chosen_moment.start,
-                clip_duration=chosen_moment.duration,
-            )
+            # Render one short per moment; a single bad moment won't kill the batch.
+            made = 0
+            total = len(picked)
+            for n, moment in enumerate(picked, start=1):
+                st.set("render", f"Rendering short {n}/{total}…")
+                base = f"{storage.new_basename(vinfo.id)}_{n:02d}"
+                out_path = s.output_dir / f"{base}.mp4"
+                try:
+                    compose.render(
+                        source_path=source,
+                        gameplay_path=gameplay,
+                        out_path=out_path,
+                        clip_start=moment.start,
+                        clip_duration=moment.duration,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    st.log.append(f"  short {n}/{total} failed: {exc}")
+                    continue
 
-            st.set("thumbnail", "Generating thumbnail…")
-            try:
-                compose.make_thumbnail(out_path, s.output_dir / f"{base}.jpg")
-            except Exception:
-                pass  # non-fatal
+                try:
+                    compose.make_thumbnail(out_path, s.output_dir / f"{base}.jpg")
+                except Exception:
+                    pass  # non-fatal
 
-            storage.write_metadata(
-                s.output_dir / f"{base}.json",
-                {
-                    "title": vinfo.title,
-                    "channel": vinfo.channel,
-                    "source_url": vinfo.url,
-                    "source_id": vinfo.id,
-                    "moment_start": chosen_moment.start,
-                    "moment_end": chosen_moment.end,
-                    "moment_reason": chosen_moment.reason,
-                    "transcript": chosen_moment.text,
-                    "duration": round(chosen_moment.duration, 2),
-                    "created_at": datetime.now().isoformat(),
-                },
-            )
+                storage.write_metadata(
+                    s.output_dir / f"{base}.json",
+                    {
+                        "title": vinfo.title,
+                        "channel": vinfo.channel,
+                        "source_url": vinfo.url,
+                        "source_id": vinfo.id,
+                        "clip_index": n,
+                        "clip_total": total,
+                        "moment_start": moment.start,
+                        "moment_end": moment.end,
+                        "moment_reason": moment.reason,
+                        "transcript": moment.text,
+                        "duration": round(moment.duration, 2),
+                        "created_at": datetime.now().isoformat(),
+                    },
+                )
+                made += 1
+                st.last_output = out_path.name
 
-            # Clean up the (large) source download; keep only the finished short.
+            # Clean up the (large) source download; keep only the finished shorts.
             try:
                 source.unlink(missing_ok=True)
             except OSError:
                 pass
 
-            st.last_output = out_path.name
-            st.set("done", f"Done: {out_path.name}")
+            if made == 0:
+                raise RuntimeError("All renders failed for the chosen video.")
+
+            # Blacklist the video so it is never used again.
+            blacklist.add(s.data_dir, vinfo.id)
+            st.set("done", f"Done: made {made} short(s) from “{vinfo.title[:50]}”.")
         except Exception as exc:  # noqa: BLE001 - surface any failure to the UI
             st.error = str(exc)
             st.set("error", f"Error: {exc}")

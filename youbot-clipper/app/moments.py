@@ -267,26 +267,22 @@ def _score_text(text: str) -> Tuple[float, List[str]]:
     return score, reasons
 
 
-def pick_best_span(
-    segments: List[Segment], clip_seconds: int
-) -> Optional[Moment]:
-    """Slide a target-length window over the transcript and return the best span."""
+def _candidate_windows(segments: List[Segment], clip_seconds: int) -> List[Moment]:
+    """Score every target-length window; return them all (unsorted)."""
+    candidates: List[Moment] = []
     if not segments:
-        return None
+        return candidates
     total = segments[-1].end
     if total < MIN_SPAN:
-        return None
+        return candidates
 
     target = max(MIN_SPAN, min(float(clip_seconds), 40.0))
-
-    best: Optional[Moment] = None
     for i, seg in enumerate(segments):
         start = seg.start
         hard_end = start + target
         if hard_end > total + 2.0:
             break
 
-        # Collect segments overlapping [start, hard_end]; snap end to a boundary.
         window: List[Segment] = []
         end = hard_end
         for s in segments[i:]:
@@ -294,7 +290,6 @@ def pick_best_span(
                 break
             window.append(s)
             end = s.end
-        # Ensure the snapped span stays within [MIN_SPAN, 40].
         span = end - start
         if span < MIN_SPAN:
             end = min(start + MIN_SPAN, total)
@@ -306,17 +301,48 @@ def pick_best_span(
 
         text = " ".join(s.text for s in window)
         score, reasons = _score_text(text)
-
-        # Down-weight intros/outros.
-        if start < total * 0.06 or end > total * 0.94:
+        if start < total * 0.06 or end > total * 0.94:  # down-weight intros/outros
             score *= 0.4
 
-        if best is None or score > best.score:
-            best = Moment(
+        candidates.append(
+            Moment(
                 start=round(start, 2),
                 end=round(end, 2),
                 score=round(score, 2),
                 reason=", ".join(dict.fromkeys(reasons)) or "dialogue density",
                 text=text[:500],
             )
-    return best
+        )
+    return candidates
+
+
+def pick_best_span(segments: List[Segment], clip_seconds: int) -> Optional[Moment]:
+    """Return the single highest-scoring span."""
+    candidates = _candidate_windows(segments, clip_seconds)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda m: m.score)
+
+
+def pick_best_spans(
+    segments: List[Segment], clip_seconds: int, max_count: int
+) -> List[Moment]:
+    """Greedily select up to max_count non-overlapping, positive-scoring spans."""
+    candidates = _candidate_windows(segments, clip_seconds)
+    if not candidates:
+        return []
+    candidates.sort(key=lambda m: m.score, reverse=True)
+    # Keep only windows with real signal, not plain dialogue-density filler.
+    top = candidates[0].score
+    cutoff = max(6.0, 0.35 * top)
+    chosen: List[Moment] = []
+    for cand in candidates:
+        if cand.score < cutoff:
+            break
+        if any(cand.start < c.end and cand.end > c.start for c in chosen):
+            continue  # overlaps an already-chosen span
+        chosen.append(cand)
+        if len(chosen) >= max_count:
+            break
+    chosen.sort(key=lambda m: m.start)  # chronological order for output
+    return chosen

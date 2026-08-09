@@ -48,6 +48,8 @@
     }
     .log.show { display: block; }
     .toggle-log { background: none; border: none; color: var(--accent2); cursor: pointer; font-size: 12px; padding: 6px 0 0; }
+    .bl-info { font-size: 12px; color: var(--muted); margin-left: 14px; }
+    .bl-info a { color: var(--accent2); cursor: pointer; text-decoration: none; }
     .grid {
       display: grid; gap: 18px;
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -96,6 +98,7 @@
         <span id="statusMsg" class="status-msg">Ready.</span>
       </div>
       <button id="toggleLog" class="toggle-log">Show log</button>
+      <span id="blacklistInfo" class="bl-info"></span>
       <div id="log" class="log"></div>
     </div>
 
@@ -180,8 +183,26 @@
         } else {
           polling = false;
           refreshClips();
+          refreshBlacklist();
         }
       } catch (e) { polling = false; }
+    }
+
+    async function refreshBlacklist() {
+      try {
+        const res = await fetch("api/blacklist");
+        const d = await res.json();
+        $("blacklistInfo").innerHTML =
+          `${d.count} video(s) used · <a id="resetBl">reset</a>`;
+        const rb = $("resetBl");
+        if (rb) rb.onclick = resetBlacklist;
+      } catch (e) { /* ignore */ }
+    }
+
+    async function resetBlacklist() {
+      if (!confirm("Clear the used-video list? Videos can then be picked again.")) return;
+      await fetch("api/blacklist/reset", { method: "POST" });
+      refreshBlacklist();
     }
 
     async function loop() {
@@ -204,6 +225,7 @@
 
     pollStatus();
     refreshClips();
+    refreshBlacklist();
   </script>
 </body>
 </html>
