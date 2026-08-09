@@ -6,10 +6,12 @@ A Home Assistant add-on repository.
 
 ### [Youbot Shorts Clipper](youbot-clipper/)
 
-Turns trending YouTube videos into vertical YouTube Shorts: the most-replayed
-≤40s moment goes on the top half, copyright-free GTA mega-ramp gameplay fills
-the bottom half (no black bars). Includes a web gallery of every clip made and a
-single **Start** button. Runs as a standalone add-on on an Intel NUC (amd64).
+Turns podcast episodes into vertical YouTube Shorts: an engaging 20–40s moment
+goes on the top half, copyright-free GTA mega-ramp gameplay fills the bottom
+half (no black bars). Works through a list of podcast channels newest-to-oldest
+(never repeating an episode) and picks moments with OpenAI. Includes a web
+gallery of every clip made and a single **Start** button. Runs as a standalone
+add-on on an Intel NUC (amd64).
 
 ## Installing on Home Assistant
 

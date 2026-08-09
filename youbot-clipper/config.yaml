@@ -1,7 +1,7 @@
 name: Youbot Shorts Clipper
-version: "0.1.5"
+version: "0.2.0"
 slug: youbot_clipper
-description: Turns trending YouTube videos into vertical Shorts with GTA gameplay on the bottom half.
+description: Turns podcast episodes into vertical Shorts with GTA gameplay on the bottom half.
 url: https://github.com/erik123121/youbot/tree/main/youbot-clipper
 arch:
   - amd64
@@ -26,22 +26,25 @@ map:
   - share:rw
 options:
   gameplay_url: "https://youtu.be/ZtLrNBdXT7M"
-  trending_region: "US"
-  candidate_count: 30
+  podcast_channels:
+    - "https://www.youtube.com/@joerogan"
+    - "https://www.youtube.com/@TheoVon"
+  channel_scan_limit: 500
   clip_seconds: 35
   output_dir: "/media/youbot"
-  max_source_minutes: 30
+  max_source_minutes: 600
   openai_api_key: ""
   openai_model: "gpt-4.1-nano"
   auto_update_addon: true
   auto_update_ytdlp: true
 schema:
   gameplay_url: url
-  trending_region: str
-  candidate_count: int(1,100)
+  podcast_channels:
+    - str
+  channel_scan_limit: int(10,5000)
   clip_seconds: int(5,40)
   output_dir: str
-  max_source_minutes: int(1,240)
+  max_source_minutes: int(1,1200)
   openai_api_key: "str?"
   openai_model: str
   auto_update_addon: bool

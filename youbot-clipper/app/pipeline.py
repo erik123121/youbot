@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from . import ai_pick, blacklist, compose, download, moments, storage, trending
+from . import ai_pick, blacklist, channels, compose, download, moments, storage
 from .config import Settings
 
 MAX_SHORTS_PER_VIDEO = 8
@@ -74,19 +74,20 @@ class Pipeline:
             if not gameplay:
                 raise RuntimeError("Could not download/cache the gameplay video.")
 
-            st.set("trending", "Finding popular videos…")
-            ids = trending.get_trending_ids(s.trending_region, s.candidate_count)
+            st.set("channels", "Finding podcast episodes…")
+            ids = channels.get_channel_video_ids(
+                list(s.podcast_channels), s.channel_scan_limit
+            )
             if not ids:
-                raise RuntimeError("No popular videos found.")
+                raise RuntimeError(
+                    "No episodes found. Check the podcast_channels list in config."
+                )
             seen = blacklist.load(s.data_dir)
-            st.set("trending", f"Found {len(ids)} candidates ({len(seen)} already used).")
+            st.set("channels", f"Found {len(ids)} episodes ({len(seen)} already used).")
 
-            # Pick the first NEW popular video that has a transcript AND downloads.
-            # Downloading here (before the AI call) means a dud video costs no API
-            # call, and a 403/network failure just moves on to the next candidate.
-            chosen_info = None
+            # Pick the first NEW episode that has a transcript AND is downloadable.
+            # A tiny 3s probe verifies access before we spend an OpenAI call.
             chosen_segments = None
-            source = None
             vinfo = None
             max_seconds = s.max_source_minutes * 60
             for idx, vid in enumerate(ids, start=1):
@@ -98,24 +99,30 @@ class Pipeline:
                     continue
                 dur = float(info.get("duration") or 0.0)
                 if dur <= 0 or dur > max_seconds:
-                    continue  # skip live/very long videos
+                    continue
                 if not segments:
                     continue  # no captions -> can't read the dialogue, skip
 
                 v = moments.video_info_from(info)
-                st.set("download", f"Downloading ({idx}/{len(ids)}): {v.title[:50]}")
-                src = download.download_source(vid, s.work_dir)
-                if not src:
-                    st.log.append(f"  download failed for {vid}; trying next candidate.")
+                st.set("scanning", f"Checking access ({idx}/{len(ids)}): {v.title[:45]}")
+                probe = download.download_segment(
+                    vid, 0.0, min(3.0, dur), s.work_dir / f"probe_{vid}"
+                )
+                if not probe:
+                    st.log.append(f"  {vid} not downloadable; trying next episode.")
                     continue
+                try:
+                    probe.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
-                chosen_info, chosen_segments, source, vinfo = info, segments, src, v
+                chosen_segments, vinfo = segments, v
                 break
 
-            if not source or not vinfo:
+            if not vinfo or not chosen_segments:
                 raise RuntimeError(
-                    "Couldn't find a new video that downloads (blocked/blacklisted). "
-                    "Try again later."
+                    "No new downloadable episode found (all used or blocked). "
+                    "Add more channels or try again later."
                 )
 
             # Find ALL good moments: one OpenAI call per run, heuristic fallback.
@@ -136,24 +143,39 @@ class Pipeline:
                 raise RuntimeError("Could not find any good moments in the transcript.")
             st.set("scanning", f"Found {len(picked)} moment(s) to clip.")
 
-            # Render one short per moment; a single bad moment won't kill the batch.
+            # For each moment: download just that segment, then render.
             made = 0
             total = len(picked)
             for n, moment in enumerate(picked, start=1):
-                st.set("render", f"Rendering short {n}/{total}…")
+                st.set("render", f"Clip {n}/{total}: downloading segment…")
+                seg = download.download_segment(
+                    vinfo.id, moment.start, moment.end,
+                    s.work_dir / f"seg_{vinfo.id}_{n:02d}",
+                )
+                if not seg:
+                    st.log.append(f"  segment {n}/{total} download failed; skipping.")
+                    continue
+
+                seg_dur = compose.probe_duration(seg) or moment.duration
+                st.set("render", f"Clip {n}/{total}: rendering…")
                 base = f"{storage.new_basename(vinfo.id)}_{n:02d}"
                 out_path = s.output_dir / f"{base}.mp4"
                 try:
                     compose.render(
-                        source_path=source,
+                        source_path=seg,
                         gameplay_path=gameplay,
                         out_path=out_path,
-                        clip_start=moment.start,
-                        clip_duration=moment.duration,
+                        clip_start=0.0,
+                        clip_duration=seg_dur,
                     )
                 except Exception as exc:  # noqa: BLE001
-                    st.log.append(f"  short {n}/{total} failed: {exc}")
+                    st.log.append(f"  clip {n}/{total} render failed: {exc}")
                     continue
+                finally:
+                    try:
+                        seg.unlink(missing_ok=True)
+                    except OSError:
+                        pass
 
                 try:
                     compose.make_thumbnail(out_path, s.output_dir / f"{base}.jpg")
@@ -173,23 +195,17 @@ class Pipeline:
                         "moment_end": moment.end,
                         "moment_reason": moment.reason,
                         "transcript": moment.text,
-                        "duration": round(moment.duration, 2),
+                        "duration": round(seg_dur, 2),
                         "created_at": datetime.now().isoformat(),
                     },
                 )
                 made += 1
                 st.last_output = out_path.name
 
-            # Clean up the (large) source download; keep only the finished shorts.
-            try:
-                source.unlink(missing_ok=True)
-            except OSError:
-                pass
-
             if made == 0:
-                raise RuntimeError("All renders failed for the chosen video.")
+                raise RuntimeError("All clips failed for the chosen episode.")
 
-            # Blacklist the video so it is never used again.
+            # Blacklist the episode so it is never used again.
             blacklist.add(s.data_dir, vinfo.id)
             st.set("done", f"Done: made {made} short(s) from “{vinfo.title[:50]}”.")
         except Exception as exc:  # noqa: BLE001 - surface any failure to the UI

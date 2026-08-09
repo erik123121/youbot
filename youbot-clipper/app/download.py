@@ -1,7 +1,7 @@
 """Download helpers built on yt-dlp.
 
-Two jobs:
-  * download the trending source video to the work dir, and
+Jobs:
+  * download a full source video, or just a time-range segment of one, and
   * download + cache the configured gameplay video once.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ _FORMAT = (
 )
 
 
-def _download(url: str, out_path: Path, with_audio: bool = True) -> Optional[Path]:
+def _download(url: str, out_path: Path, extra: Optional[dict] = None) -> Optional[Path]:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     opts = {
         "quiet": True,
@@ -39,6 +39,8 @@ def _download(url: str, out_path: Path, with_audio: bool = True) -> Optional[Pat
         # that hit the default web client.
         "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
+    if extra:
+        opts.update(extra)
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
     # yt-dlp appends the real extension; find what it produced.
@@ -49,11 +51,29 @@ def _download(url: str, out_path: Path, with_audio: bool = True) -> Optional[Pat
 
 
 def download_source(video_id: str, work_dir: Path) -> Optional[Path]:
-    """Download a source video; return None (instead of raising) on any failure
-    so the pipeline can move on to the next candidate."""
+    """Download a full source video; None on failure (so we can try the next)."""
     url = f"https://www.youtube.com/watch?v={video_id}"
     try:
-        return _download(url, work_dir / f"source_{video_id}", with_audio=True)
+        return _download(url, work_dir / f"source_{video_id}")
+    except Exception:
+        return None
+
+
+def download_segment(
+    video_id: str, start: float, end: float, out_path: Path
+) -> Optional[Path]:
+    """Download ONLY the [start, end] time range of a video (exact, re-cut to
+    keyframes). Keeps downloads tiny regardless of episode length. None on error.
+    """
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    try:
+        from yt_dlp.utils import download_range_func
+
+        extra = {
+            "download_ranges": download_range_func(None, [(float(start), float(end))]),
+            "force_keyframes_at_cuts": True,
+        }
+        return _download(url, out_path, extra)
     except Exception:
         return None
 
@@ -64,4 +84,4 @@ def ensure_gameplay(url: str, gameplay_dir: Path) -> Optional[Path]:
     for c in cached:
         if c.suffix.lower() in (".mp4", ".mkv", ".webm") and c.stat().st_size > 0:
             return c
-    return _download(url, gameplay_dir / "gameplay", with_audio=False)
+    return _download(url, gameplay_dir / "gameplay")

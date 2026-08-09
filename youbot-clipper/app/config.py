@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,11 +16,14 @@ OPTIONS_PATH = Path("/data/options.json")
 
 _DEFAULTS = {
     "gameplay_url": "https://youtu.be/ZtLrNBdXT7M",
-    "trending_region": "US",
-    "candidate_count": 30,
+    "podcast_channels": [
+        "https://www.youtube.com/@joerogan",
+        "https://www.youtube.com/@TheoVon",
+    ],
+    "channel_scan_limit": 500,
     "clip_seconds": 35,
     "output_dir": "/media/youbot",
-    "max_source_minutes": 30,
+    "max_source_minutes": 600,
     "openai_api_key": "",
     "openai_model": "gpt-4.1-nano",
 }
@@ -28,8 +32,8 @@ _DEFAULTS = {
 @dataclass(frozen=True)
 class Settings:
     gameplay_url: str
-    trending_region: str
-    candidate_count: int
+    podcast_channels: tuple
+    channel_scan_limit: int
     clip_seconds: int
     output_dir: Path
     max_source_minutes: int
@@ -61,13 +65,21 @@ def _raw_options() -> dict:
     return env
 
 
+def _parse_channels(value) -> tuple:
+    if isinstance(value, str):
+        parts = [p.strip() for p in re.split(r"[\n,]", value)]
+    else:
+        parts = [str(p).strip() for p in (value or [])]
+    return tuple(p for p in parts if p)
+
+
 def load_settings() -> Settings:
     raw = {**_DEFAULTS, **_raw_options()}
     data_dir = Path(os.environ.get("YOUBOT_DATA_DIR", "/data"))
     settings = Settings(
         gameplay_url=str(raw["gameplay_url"]),
-        trending_region=str(raw["trending_region"]).upper(),
-        candidate_count=int(raw["candidate_count"]),
+        podcast_channels=_parse_channels(raw["podcast_channels"]),
+        channel_scan_limit=int(raw["channel_scan_limit"]),
         clip_seconds=max(5, min(40, int(raw["clip_seconds"]))),
         output_dir=Path(str(raw["output_dir"])),
         max_source_minutes=int(raw["max_source_minutes"]),

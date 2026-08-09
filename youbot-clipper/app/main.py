@@ -43,7 +43,7 @@ def config():
     s = settings
     return {
         "gameplay_url": s.gameplay_url,
-        "trending_region": s.trending_region,
+        "podcast_channels": list(s.podcast_channels),
         "clip_seconds": s.clip_seconds,
         "output_dir": str(s.output_dir),
     }
