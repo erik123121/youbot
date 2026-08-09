@@ -104,13 +104,13 @@ class Pipeline:
 
             # Choose the moment: one Gemini call per run, heuristic as fallback.
             chosen_moment = None
-            if s.gemini_api_key:
-                st.set("ai", "Asking Gemini for the best moment…")
+            if s.openai_api_key:
+                st.set("ai", "Asking OpenAI for the best moment…")
                 chosen_moment, err = ai_pick.pick_moment(
-                    chosen_segments, s.gemini_api_key, s.gemini_model, s.clip_seconds
+                    chosen_segments, s.openai_api_key, s.openai_model, s.clip_seconds
                 )
                 if err:
-                    st.log.append(f"  Gemini unavailable ({err}); using on-device scorer.")
+                    st.log.append(f"  OpenAI unavailable ({err}); using on-device scorer.")
             if chosen_moment is None:
                 chosen_moment = moments.pick_best_span(chosen_segments, s.clip_seconds)
             if chosen_moment is None:

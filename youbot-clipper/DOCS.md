@@ -14,11 +14,12 @@ Press **Start** and the add-on:
 1. Ensures the configured gameplay video is downloaded and cached (once).
 2. Finds currently-popular videos by searching big categories (music, gaming,
    sports, etc.) filtered to the last week — no API key.
-3. For each candidate it downloads the timed transcript and asks Google Gemini
-   (free tier) to choose the single most engaging 20–`clip_seconds` span. If no
-   Gemini key is set, or the call fails, it falls back to an on-device scorer
-   (reactions, exclamations, questions, high-energy words, speech density).
-   Videos with no captions are skipped.
+3. It picks the first candidate with a usable transcript and asks OpenAI (a
+   small, cheap model — one call per run) to choose the single most engaging
+   20–`clip_seconds` span. If no key is set, or the call fails (out of credit,
+   rate limit, etc.), it falls back to an on-device scorer (reactions,
+   exclamations, questions, high-energy words, speech density). Videos with no
+   captions are skipped.
 4. Downloads that video and renders the Short with ffmpeg: a 50/50 split
    (clip on top, gameplay on the bottom, both cover-cropped so there are no
    black bars).
@@ -39,8 +40,8 @@ Press **Start** and the add-on:
 | `clip_seconds` | `35` | Length of the moment (max 40). |
 | `output_dir` | `/media/youbot` | Where finished Shorts are saved. `/media/...` makes them appear in the HA Media browser. |
 | `max_source_minutes` | `30` | Skip source videos longer than this (avoids live streams / very long uploads). |
-| `gemini_api_key` | _(empty)_ | Free Google Gemini API key (from Google AI Studio) used to pick the best moment. Leave empty to use the on-device scorer instead. |
-| `gemini_model` | `gemini-2.0-flash` | Gemini model used for moment selection. |
+| `openai_api_key` | _(empty)_ | OpenAI API key used to pick the best moment. Leave empty to use the on-device scorer instead. One small request per run (~$0.0004 with the default model). |
+| `openai_model` | `gpt-4.1-nano` | OpenAI model for moment selection. `gpt-4.1-nano` is the cheapest capable option; `gpt-4o-mini` is a slightly pricier alternative. |
 | `auto_update_addon` | `true` | On each start, pull the latest app code from the repo's `main` branch and run that. Lets you apply code fixes by just **Restarting** the add-on instead of using HA's Update button. |
 | `auto_update_ytdlp` | `true` | On each start, upgrade yt-dlp to the latest release (YouTube frequently breaks older versions). |
 

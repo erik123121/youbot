@@ -1,8 +1,10 @@
-"""Pick the best 20-40s moment with Google's Gemini API (free tier).
+"""Pick the best 20-40s moment with the OpenAI API, cheaply.
 
-Given the timestamped transcript, Gemini returns the start/end of the single
-most engaging span. On any problem (no key, network error, bad response) this
-returns (None, reason) so the caller can fall back to the on-device scorer.
+Given the timestamped transcript, a small model (default gpt-4.1-nano) returns
+the start/end of the single most engaging span. Requests are kept tiny — a
+compact transcript in, a few tokens of JSON out — so usage stays a fraction of
+a cent per run. On any problem (no key, out of credit, network, bad response)
+this returns (None, reason) so the caller falls back to the on-device scorer.
 """
 from __future__ import annotations
 
@@ -15,16 +17,13 @@ from typing import List, Optional, Tuple
 
 from .moments import MIN_SPAN, Moment, Segment
 
-_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 _TIMEOUT = 45
 _MAX_SPAN = 40.0
+_MAX_TRANSCRIPT_CHARS = 12000  # keep the request small/cheap
 
 
-def _mmss(t: float) -> str:
-    return f"{int(t // 60):02d}:{int(t % 60):02d}"
-
-
-def _build_transcript(segments: List[Segment], max_chars: int = 24000) -> str:
+def _build_transcript(segments: List[Segment], max_chars: int = _MAX_TRANSCRIPT_CHARS) -> str:
     """Compact timestamped transcript: one line per ~8s of dialogue."""
     lines: List[str] = []
     bucket_start = None
@@ -45,7 +44,7 @@ def _build_transcript(segments: List[Segment], max_chars: int = 24000) -> str:
     flush()
 
     text = "\n".join(lines)
-    if len(text) > max_chars:  # keep the request small for very long videos
+    if len(text) > max_chars:  # very long videos: keep it bounded
         text = text[:max_chars]
     return text
 
@@ -53,42 +52,47 @@ def _build_transcript(segments: List[Segment], max_chars: int = 24000) -> str:
 def _prompt(transcript: str, duration: float, clip_seconds: int) -> str:
     hi = min(_MAX_SPAN, float(clip_seconds))
     return (
-        "You are an expert short-form video editor. Below is a timestamped "
-        "transcript of a video; each line starts with the start time in seconds "
-        "in square brackets.\n\n"
-        f"Pick the SINGLE most engaging, self-contained moment to turn into a "
-        f"vertical Short. It must be a contiguous span between {MIN_SPAN:.0f} and "
-        f"{hi:.0f} seconds long. Favor a strong hook, payoff, humor, surprise, or "
-        "high emotion. Avoid intros, outros, and sponsor/ad reads. The span must "
-        f"lie within the video, which is {duration:.0f} seconds long.\n\n"
-        "Respond with ONLY JSON of the form "
-        '{\"start_seconds\": number, \"end_seconds\": number, \"reason\": \"short phrase\"}.\n\n'
+        "Below is a timestamped transcript of a video; each line starts with its "
+        "start time in seconds in square brackets.\n\n"
+        f"Pick the SINGLE most engaging, self-contained moment for a vertical "
+        f"Short. It must be a contiguous span between {MIN_SPAN:.0f} and {hi:.0f} "
+        "seconds long. Favor a strong hook, payoff, humor, surprise, or high "
+        "emotion. Avoid intros, outros, and sponsor/ad reads. The span must lie "
+        f"within the video, which is {duration:.0f} seconds long.\n\n"
+        'Respond with ONLY JSON: '
+        '{"start_seconds": number, "end_seconds": number, "reason": "short phrase"}\n\n'
         "TRANSCRIPT:\n" + transcript
     )
 
 
-def _retry_delay(body: str) -> Optional[float]:
-    """Pull Google's suggested retryDelay (e.g. '7s') out of a 429 body."""
-    m = re.search(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"', body)
-    return float(m.group(1)) if m else None
-
-
-def _call_gemini(api_key: str, model: str, prompt: str) -> Tuple[Optional[dict], Optional[str]]:
-    url = _ENDPOINT.format(model=model) + f"?key={api_key}"
+def _call_openai(api_key: str, model: str, prompt: str) -> Tuple[Optional[dict], Optional[str]]:
     body = json.dumps(
         {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.4,
-                "responseMimeType": "application/json",
-            },
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an expert short-form video editor. "
+                    "Respond only with JSON.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.4,
+            "max_tokens": 120,
+            "response_format": {"type": "json_object"},
         }
     ).encode("utf-8")
 
     payload = None
     for attempt in range(2):  # one retry, mainly for transient 429s
         req = urllib.request.Request(
-            url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+            _ENDPOINT,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+            method="POST",
         )
         try:
             with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
@@ -101,11 +105,15 @@ def _call_gemini(api_key: str, model: str, prompt: str) -> Tuple[Optional[dict],
             except Exception:
                 pass
             if exc.code == 429:
-                delay = _retry_delay(detail) or 6.0
-                if attempt == 0 and delay <= 15:
-                    time.sleep(delay)
+                # Out of credit is also a 429; retrying won't help there.
+                if "insufficient_quota" in detail:
+                    return None, "out of OpenAI credit (insufficient_quota)"
+                if attempt == 0:
+                    time.sleep(6)
                     continue
-                return None, "quota/rate limit hit (HTTP 429) — free-tier limit reached"
+                return None, "rate limited (HTTP 429)"
+            if exc.code == 401:
+                return None, "invalid API key (HTTP 401)"
             snippet = " ".join(detail.split())[:140]
             return None, f"HTTP {exc.code}: {snippet}"
         except Exception as exc:  # noqa: BLE001
@@ -115,11 +123,10 @@ def _call_gemini(api_key: str, model: str, prompt: str) -> Tuple[Optional[dict],
         return None, "no response"
 
     try:
-        text = payload["candidates"][0]["content"]["parts"][0]["text"]
+        text = payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
         return None, "unexpected response shape"
 
-    # responseMimeType=json should give clean JSON, but be forgiving.
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
         return None, "no JSON in response"
@@ -147,7 +154,7 @@ def pick_moment(
     transcript = _build_transcript(segments)
     prompt = _prompt(transcript, duration, clip_seconds)
 
-    data, err = _call_gemini(api_key, model, prompt)
+    data, err = _call_openai(api_key, model, prompt)
     if err:
         return None, err
     try:
@@ -172,7 +179,6 @@ def pick_moment(
     if end - start < MIN_SPAN:
         return None, "span too short after clamping"
 
-    # Text of the chosen span, for the metadata sidecar.
     clip_text = " ".join(
         seg.text for seg in segments if seg.end > start and seg.start < end
     )[:500]
