@@ -19,6 +19,7 @@ from typing import Tuple
 
 OUT_W = 1080
 OUT_H = 1920
+FPS = 30
 TOP_MAX_FRACTION = 0.60  # clip never taller than 60% of the frame
 
 
@@ -37,6 +38,20 @@ def probe_dimensions(path: Path) -> Tuple[int, int]:
     )
     stream = json.loads(out.stdout)["streams"][0]
     return int(stream["width"]), int(stream["height"])
+
+
+def probe_has_audio(path: Path) -> bool:
+    out = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "a:0",
+            "-show_entries", "stream=index", "-of", "json", str(path),
+        ],
+        capture_output=True, text=True,
+    )
+    try:
+        return bool(json.loads(out.stdout).get("streams"))
+    except (json.JSONDecodeError, ValueError):
+        return False
 
 
 def probe_duration(path: Path) -> float:
@@ -79,16 +94,24 @@ def render(
     bottom_h = _even(OUT_H - top_h)
 
     gp_start = random_gameplay_start(gameplay_path, clip_duration)
+    has_audio = probe_has_audio(source_path)
 
-    # Top: fill width, then center-crop to the top region height if the clip is
-    # taller than the cap. Bottom: scale-to-cover the bottom region and crop.
+    # Normalize both branches to a common CFR and reset PTS to 0 before stacking.
+    # Without fps normalization + setpts, stacking two seeked inputs produces
+    # broken timestamps (a file that won't play) and a bloated, slow encode.
+    #   Top:    fill width, center-crop to the top region height.
+    #   Bottom: scale-to-cover the bottom region and crop (no black bars).
     filtergraph = (
-        f"[0:v]scale={OUT_W}:-2:force_original_aspect_ratio=increase,"
-        f"crop={OUT_W}:{top_h}:(iw-{OUT_W})/2:(ih-{top_h})/2,setsar=1[top];"
+        f"[0:v]scale={OUT_W}:-2,"
+        f"crop={OUT_W}:{top_h}:(iw-{OUT_W})/2:(ih-{top_h})/2,"
+        f"setsar=1,fps={FPS},setpts=PTS-STARTPTS[top];"
         f"[1:v]scale={OUT_W}:{bottom_h}:force_original_aspect_ratio=increase,"
-        f"crop={OUT_W}:{bottom_h}:(iw-{OUT_W})/2:(ih-{bottom_h})/2,setsar=1[bot];"
-        f"[top][bot]vstack=inputs=2[v]"
+        f"crop={OUT_W}:{bottom_h}:(iw-{OUT_W})/2:(ih-{bottom_h})/2,"
+        f"setsar=1,fps={FPS},setpts=PTS-STARTPTS[bot];"
+        f"[top][bot]vstack=inputs=2,format=yuv420p[v]"
     )
+    if has_audio:
+        filtergraph += ";[0:a]aresample=async=1,asetpts=PTS-STARTPTS[a]"
 
     cmd = [
         "ffmpeg", "-y",
@@ -96,14 +119,23 @@ def render(
         "-ss", f"{gp_start}", "-t", f"{clip_duration}", "-i", str(gameplay_path),
         "-filter_complex", filtergraph,
         "-map", "[v]",
-        "-map", "0:a?",
+    ]
+    if has_audio:
+        cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "128k"]
+    else:
+        cmd += ["-an"]
+    cmd += [
         "-t", f"{clip_duration}",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "128k",
+        "-r", str(FPS),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
+        "-profile:v", "high", "-level", "4.2",
         "-movflags", "+faststart",
         str(out_path),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()[-3:]
+        raise RuntimeError("ffmpeg render failed: " + " | ".join(tail))
     return out_path
 
 
