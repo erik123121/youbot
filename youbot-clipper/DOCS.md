@@ -19,7 +19,9 @@ Press **Start** and the add-on:
    questions, high-energy words, emphasis, speech density), avoiding intros/outros
    and sponsor reads. The best span is snapped to caption boundaries so it never
    cuts mid-sentence. Videos with no captions are skipped. Free and on-device.
-4. Downloads that video and renders the split-screen Short with ffmpeg.
+4. Downloads that video and renders the Short with ffmpeg: a 50/50 split
+   (clip on top, gameplay on the bottom, both cover-cropped so there are no
+   black bars), with Shorts-style captions burned in from the transcript.
 5. Saves the `.mp4` (plus a thumbnail and a metadata `.json`) to `output_dir`.
 
 ## Opening the UI
