@@ -191,6 +191,7 @@ def fetch_info_and_transcript(
         "subtitleslangs": _SUB_LANGS,
         "subtitlesformat": "json3",
         "outtmpl": str(out_base) + ".%(ext)s",
+        "source_address": "0.0.0.0",  # force IPv4 (avoid broken-IPv6 failures)
     }
     info = None
     try:

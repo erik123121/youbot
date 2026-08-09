@@ -81,9 +81,13 @@ class Pipeline:
             seen = blacklist.load(s.data_dir)
             st.set("trending", f"Found {len(ids)} candidates ({len(seen)} already used).")
 
-            # Pick the first NEW popular video that has a usable transcript.
+            # Pick the first NEW popular video that has a transcript AND downloads.
+            # Downloading here (before the AI call) means a dud video costs no API
+            # call, and a 403/network failure just moves on to the next candidate.
             chosen_info = None
             chosen_segments = None
+            source = None
+            vinfo = None
             max_seconds = s.max_source_minutes * 60
             for idx, vid in enumerate(ids, start=1):
                 if vid in seen:
@@ -97,14 +101,21 @@ class Pipeline:
                     continue  # skip live/very long videos
                 if not segments:
                     continue  # no captions -> can't read the dialogue, skip
-                chosen_info = info
-                chosen_segments = segments
+
+                v = moments.video_info_from(info)
+                st.set("download", f"Downloading ({idx}/{len(ids)}): {v.title[:50]}")
+                src = download.download_source(vid, s.work_dir)
+                if not src:
+                    st.log.append(f"  download failed for {vid}; trying next candidate.")
+                    continue
+
+                chosen_info, chosen_segments, source, vinfo = info, segments, src, v
                 break
 
-            if not chosen_info or not chosen_segments:
+            if not source or not vinfo:
                 raise RuntimeError(
-                    "No new popular video with usable captions was found "
-                    "(everything found was already used). Try again later."
+                    "Couldn't find a new video that downloads (blocked/blacklisted). "
+                    "Try again later."
                 )
 
             # Find ALL good moments: one OpenAI call per run, heuristic fallback.
@@ -124,12 +135,6 @@ class Pipeline:
             if not picked:
                 raise RuntimeError("Could not find any good moments in the transcript.")
             st.set("scanning", f"Found {len(picked)} moment(s) to clip.")
-
-            vinfo = moments.video_info_from(chosen_info)
-            st.set("download", f"Downloading: {vinfo.title[:60]}")
-            source = download.download_source(vinfo.id, s.work_dir)
-            if not source:
-                raise RuntimeError("Failed to download the source video.")
 
             # Render one short per moment; a single bad moment won't kill the batch.
             made = 0

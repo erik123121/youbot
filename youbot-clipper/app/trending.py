@@ -41,6 +41,7 @@ def _extract_ids(target: str, limit: int, region: str) -> List[str]:
         "playlistend": limit,
         "geo_bypass": True,
         "geo_bypass_country": region,
+        "source_address": "0.0.0.0",  # force IPv4 (avoid broken-IPv6 failures)
     }
     ids: List[str] = []
     try:
