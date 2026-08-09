@@ -16,6 +16,11 @@ from .config import Settings
 
 MAX_SHORTS_PER_VIDEO = 8
 MAX_SCAN_ATTEMPTS = 40  # episodes to inspect before giving up in one run
+# Generous upper bound so normal 1-3h podcasts always pass; only guards against
+# absurd multi-hour livestreams. Not tied to config (segment downloads make
+# episode length irrelevant), so a stale saved max_source_minutes can't skip
+# every real episode.
+MAX_EPISODE_SECONDS = 6 * 3600
 
 
 @dataclass
@@ -91,7 +96,6 @@ class Pipeline:
             # Cap how many we inspect so a bad streak never grinds through the pool.
             chosen_segments = None
             vinfo = None
-            max_seconds = s.max_source_minutes * 60
             attempts = 0
             for vid in ids:
                 if vid in seen:
@@ -108,7 +112,7 @@ class Pipeline:
                     st.log.append(f"  #{attempts} {vid}: couldn't read info; skip.")
                     continue
                 dur = float(info.get("duration") or 0.0)
-                if dur <= 0 or dur > max_seconds:
+                if dur <= 0 or dur > MAX_EPISODE_SECONDS:
                     st.log.append(f"  #{attempts} {vid}: duration {int(dur)}s out of range; skip.")
                     continue
                 if not segments:
