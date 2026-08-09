@@ -15,17 +15,24 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from . import blacklist, storage
+from .autopilot import Autopilot
 from .config import load_settings
 from .pipeline import Pipeline
 
 settings = load_settings()
 pipeline = Pipeline(settings)
+autopilot = Autopilot(settings)
 
 app = FastAPI(title="Youbot Shorts Clipper")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 _RANGE_RE = re.compile(r"bytes=(\d+)-(\d*)")
 _CHUNK = 1024 * 1024
+
+
+@app.on_event("startup")
+def _resume_autopilot():
+    autopilot.resume_if_enabled()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -71,6 +78,28 @@ def blacklist_info():
 @app.post("/api/blacklist/reset")
 def blacklist_reset():
     return {"ok": True, "cleared": blacklist.clear(settings.data_dir)}
+
+
+@app.get("/api/autopilot")
+def autopilot_status():
+    return autopilot.status()
+
+
+@app.post("/api/autopilot/start")
+def autopilot_start():
+    if not settings.youtube_refresh_token:
+        return JSONResponse(
+            {"ok": False, "message": "YouTube not configured yet (see DOCS)."},
+            status_code=400,
+        )
+    autopilot.start()
+    return {"ok": True}
+
+
+@app.post("/api/autopilot/stop")
+def autopilot_stop():
+    autopilot.stop()
+    return {"ok": True}
 
 
 @app.get("/thumbs/{filename}")

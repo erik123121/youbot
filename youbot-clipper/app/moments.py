@@ -79,6 +79,7 @@ class Moment:
     score: float
     reason: str
     text: str
+    title: str = ""  # catchy title (AI-suggested; empty for the heuristic picker)
 
     @property
     def duration(self) -> float:

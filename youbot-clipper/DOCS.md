@@ -41,6 +41,44 @@ Press **Start** and the add-on:
 | `max_source_minutes` | `600` | Skip episodes longer than this (a guard against multi-hour live streams). Only the chosen segments are downloaded, so length is otherwise not a problem. |
 | `openai_api_key` | _(empty)_ | OpenAI API key used to pick the best moment. Leave empty to use the on-device scorer instead. One small request per run (~$0.0004 with the default model). |
 | `openai_model` | `gpt-4.1-nano` | OpenAI model for moment selection. `gpt-4.1-nano` is the cheapest capable option; `gpt-4o-mini` is a slightly pricier alternative. |
+| `youtube_client_id` | _(empty)_ | OAuth client ID for auto-uploading (see YouTube setup below). |
+| `youtube_client_secret` | _(empty)_ | OAuth client secret. |
+| `youtube_refresh_token` | _(empty)_ | OAuth refresh token for your channel. |
+| `upload_privacy` | `public` | Visibility of uploaded Shorts: `public`, `unlisted`, or `private`. |
+| `upload_min_hours` / `upload_max_hours` | `2` / `5` | Random delay range between uploads. |
+
+## Autopilot (auto-upload to YouTube)
+
+With YouTube configured, press **Start Autopilot** in the UI and the add-on will
+continuously: generate a batch of Shorts from one new episode, then drip-upload
+them to your channel with a random `upload_min_hours`–`upload_max_hours` delay
+each, and generate the next batch when the queue empties. It resumes after a
+restart. Press **Stop Autopilot** to pause.
+
+**Note:** YouTube's free API quota allows only **~6 uploads per day**. When the
+quota is hit, autopilot waits for the daily reset — so throughput tops out around
+6 Shorts/day regardless of the delay setting.
+
+### One-time YouTube setup
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create/select a
+   project and **enable the "YouTube Data API v3"** (APIs & Services → Library).
+2. **OAuth consent screen**: choose *External*, fill the basics, add the
+   `.../auth/youtube.upload` scope, and set the publishing status to **In
+   production** (Testing mode expires refresh tokens after 7 days).
+3. **Credentials → Create credentials → OAuth client ID → Web application.**
+   Add the authorized redirect URI `https://developers.google.com/oauthplayground`.
+   Copy the **Client ID** and **Client secret**.
+4. Get a refresh token with the
+   [OAuth Playground](https://developers.google.com/oauthplayground): click the
+   gear (top-right) → check *Use your own OAuth credentials* → paste your client
+   ID/secret. In Step 1 enter the scope
+   `https://www.googleapis.com/auth/youtube.upload` → **Authorize APIs**, sign in
+   with the channel's Google account and allow. In Step 2 click **Exchange
+   authorization code for tokens** and copy the **refresh token**.
+5. Paste the client ID, client secret, and refresh token into the add-on's
+   config, set `upload_privacy`, **Save**, and **Restart**. Then press **Start
+   Autopilot**.
 | `auto_update_addon` | `true` | On each start, pull the latest app code from the repo's `main` branch and run that. Lets you apply code fixes by just **Restarting** the add-on instead of using HA's Update button. |
 | `auto_update_ytdlp` | `true` | On each start, upgrade yt-dlp to the latest release (YouTube frequently breaks older versions). |
 

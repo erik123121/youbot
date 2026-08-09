@@ -26,6 +26,12 @@ _DEFAULTS = {
     "max_source_minutes": 600,
     "openai_api_key": "",
     "openai_model": "gpt-4.1-nano",
+    "youtube_client_id": "",
+    "youtube_client_secret": "",
+    "youtube_refresh_token": "",
+    "upload_privacy": "public",
+    "upload_min_hours": 2,
+    "upload_max_hours": 5,
 }
 
 
@@ -39,6 +45,12 @@ class Settings:
     max_source_minutes: int
     openai_api_key: str
     openai_model: str
+    youtube_client_id: str
+    youtube_client_secret: str
+    youtube_refresh_token: str
+    upload_privacy: str
+    upload_min_hours: float
+    upload_max_hours: float
     data_dir: Path
 
     @property
@@ -86,6 +98,13 @@ def load_settings() -> Settings:
         openai_api_key=str(raw.get("openai_api_key", "")).strip(),
         openai_model=str(raw.get("openai_model", "gpt-4.1-nano")).strip()
         or "gpt-4.1-nano",
+        youtube_client_id=str(raw.get("youtube_client_id", "")).strip(),
+        youtube_client_secret=str(raw.get("youtube_client_secret", "")).strip(),
+        youtube_refresh_token=str(raw.get("youtube_refresh_token", "")).strip(),
+        upload_privacy=str(raw.get("upload_privacy", "public")).strip().lower()
+        or "public",
+        upload_min_hours=float(raw.get("upload_min_hours", 2)),
+        upload_max_hours=float(raw.get("upload_max_hours", 5)),
         data_dir=data_dir,
     )
     for d in (settings.output_dir, settings.gameplay_dir, settings.work_dir):

@@ -1,5 +1,5 @@
 name: Youbot Shorts Clipper
-version: "0.2.0"
+version: "0.3.0"
 slug: youbot_clipper
 description: Turns podcast episodes into vertical Shorts with GTA gameplay on the bottom half.
 url: https://github.com/erik123121/youbot/tree/main/youbot-clipper
@@ -35,6 +35,12 @@ options:
   max_source_minutes: 600
   openai_api_key: ""
   openai_model: "gpt-4.1-nano"
+  youtube_client_id: ""
+  youtube_client_secret: ""
+  youtube_refresh_token: ""
+  upload_privacy: "public"
+  upload_min_hours: 2
+  upload_max_hours: 5
   auto_update_addon: true
   auto_update_ytdlp: true
 schema:
@@ -47,5 +53,11 @@ schema:
   max_source_minutes: int(1,1200)
   openai_api_key: "str?"
   openai_model: str
+  youtube_client_id: "str?"
+  youtube_client_secret: "str?"
+  youtube_refresh_token: "str?"
+  upload_privacy: "list(public|unlisted|private)"
+  upload_min_hours: int(1,48)
+  upload_max_hours: int(1,48)
   auto_update_addon: bool
   auto_update_ytdlp: bool

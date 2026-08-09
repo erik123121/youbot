@@ -102,6 +102,18 @@
       <div id="log" class="log"></div>
     </div>
 
+    <div class="status" id="autopilotCard">
+      <div class="status-row" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span id="apDot" class="dot"></span>
+          <strong style="font-size:14px">Autopilot</strong>
+          <span id="apSummary" class="status-msg" style="color:var(--muted)"></span>
+        </div>
+        <button id="apToggle" class="start-btn" style="padding:8px 16px;font-size:13px">Start Autopilot</button>
+      </div>
+      <div id="apDetail" class="status-msg" style="color:var(--muted);margin-top:8px;font-size:13px"></div>
+    </div>
+
     <p class="section-title">Gallery</p>
     <div id="grid" class="grid"></div>
     <div id="empty" class="empty" style="display:none">
@@ -223,9 +235,43 @@
       $("toggleLog").textContent = showing ? "Hide log" : "Show log";
     });
 
+    async function refreshAutopilot() {
+      try {
+        const res = await fetch("api/autopilot");
+        const a = await res.json();
+        $("apDot").className = "dot" + (a.enabled ? (a.generating ? " running" : " done") : "");
+        $("apToggle").textContent = a.enabled ? "Stop Autopilot" : "Start Autopilot";
+        const next = a.next_upload_at ? new Date(a.next_upload_at).toLocaleTimeString() : "—";
+        $("apSummary").textContent = a.enabled
+          ? `queue ${a.queue_len} · uploaded ${a.uploaded} · next ${next}`
+          : "off";
+        let detail = a.last_result || "";
+        if (a.generating && a.gen) detail = "Generating: " + a.gen.message;
+        $("apDetail").textContent = detail;
+      } catch (e) { /* ignore */ }
+    }
+
+    $("apToggle").addEventListener("click", async () => {
+      const res = await fetch("api/autopilot");
+      const a = await res.json();
+      if (a.enabled) {
+        await fetch("api/autopilot/stop", { method: "POST" });
+      } else {
+        const r = await fetch("api/autopilot/start", { method: "POST" });
+        if (r.status === 400) {
+          const d = await r.json();
+          alert(d.message || "Could not start autopilot.");
+        }
+      }
+      refreshAutopilot();
+    });
+
+    setInterval(refreshAutopilot, 5000);
+
     pollStatus();
     refreshClips();
     refreshBlacklist();
+    refreshAutopilot();
   </script>
 </body>
 </html>

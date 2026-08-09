@@ -61,8 +61,10 @@ def _prompt(transcript: str, duration: float, clip_seconds: int, max_count: int)
         "high emotion. Only include moments that are actually good — fewer is fine. "
         "Skip intros, outros, and sponsor/ad reads. Every span must lie within the "
         f"video, which is {duration:.0f} seconds long. Order them best first.\n\n"
+        "For each clip also write a punchy YouTube Short title (<= 80 chars, no "
+        "hashtags, no surrounding quotes).\n\n"
         'Respond with ONLY JSON: {"clips": [{"start_seconds": number, '
-        '"end_seconds": number, "reason": "short phrase"}]}\n\n'
+        '"end_seconds": number, "reason": "short phrase", "title": "catchy title"}]}\n\n'
         "TRANSCRIPT:\n" + transcript
     )
 
@@ -148,7 +150,8 @@ def _snap(segments: List[Segment], start: float, end: float) -> Tuple[float, flo
 
 
 def _finalize(
-    segments: List[Segment], duration: float, start: float, end: float, reason: str
+    segments: List[Segment], duration: float, start: float, end: float,
+    reason: str, title: str = "",
 ) -> Optional[Moment]:
     """Clamp/snap one span to the 20..40s rules; None if it can't be made valid."""
     start = max(0.0, min(start, duration))
@@ -172,6 +175,7 @@ def _finalize(
         score=0.0,
         reason=(reason.strip()[:120] or "AI pick"),
         text=clip_text,
+        title=title.strip().strip('"').strip()[:100],
     )
 
 
@@ -203,7 +207,8 @@ def pick_moments(
         except (KeyError, TypeError, ValueError):
             continue
         moment = _finalize(
-            segments, duration, start, end, str(item.get("reason", "AI pick"))
+            segments, duration, start, end,
+            str(item.get("reason", "AI pick")), str(item.get("title", "")),
         )
         if moment is None:
             continue
