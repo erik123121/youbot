@@ -15,6 +15,7 @@ from . import ai_pick, blacklist, channels, compose, download, moments, storage
 from .config import Settings
 
 MAX_SHORTS_PER_VIDEO = 8
+MAX_SCAN_ATTEMPTS = 40  # episodes to inspect before giving up in one run
 
 
 @dataclass
@@ -87,42 +88,54 @@ class Pipeline:
 
             # Pick the first NEW episode that has a transcript AND is downloadable.
             # A tiny 3s probe verifies access before we spend an OpenAI call.
+            # Cap how many we inspect so a bad streak never grinds through the pool.
             chosen_segments = None
             vinfo = None
             max_seconds = s.max_source_minutes * 60
-            for idx, vid in enumerate(ids, start=1):
+            attempts = 0
+            for vid in ids:
                 if vid in seen:
                     continue  # already turned into shorts before
-                st.set("scanning", f"Reading transcript ({idx}/{len(ids)})…")
+                attempts += 1
+                if attempts > MAX_SCAN_ATTEMPTS:
+                    st.log.append(
+                        f"  gave up after inspecting {MAX_SCAN_ATTEMPTS} episodes."
+                    )
+                    break
+                st.set("scanning", f"Checking episode {attempts}…")
                 info, segments = moments.fetch_info_and_transcript(vid, s.work_dir)
                 if not info:
+                    st.log.append(f"  #{attempts} {vid}: couldn't read info; skip.")
                     continue
                 dur = float(info.get("duration") or 0.0)
                 if dur <= 0 or dur > max_seconds:
+                    st.log.append(f"  #{attempts} {vid}: duration {int(dur)}s out of range; skip.")
                     continue
                 if not segments:
-                    continue  # no captions -> can't read the dialogue, skip
+                    st.log.append(f"  #{attempts} {vid}: no captions; skip.")
+                    continue
 
                 v = moments.video_info_from(info)
-                st.set("scanning", f"Checking access ({idx}/{len(ids)}): {v.title[:45]}")
                 probe = download.download_segment(
                     vid, 0.0, min(3.0, dur), s.work_dir / f"probe_{vid}"
                 )
                 if not probe:
-                    st.log.append(f"  {vid} not downloadable; trying next episode.")
+                    st.log.append(f"  #{attempts} {vid}: not downloadable; skip.")
                     continue
                 try:
                     probe.unlink(missing_ok=True)
                 except OSError:
                     pass
 
+                st.log.append(f"  #{attempts} {v.title[:50]}: usable ✓")
                 chosen_segments, vinfo = segments, v
                 break
 
             if not vinfo or not chosen_segments:
                 raise RuntimeError(
-                    "No new downloadable episode found (all used or blocked). "
-                    "Add more channels or try again later."
+                    f"No usable new episode in the first {attempts} checked "
+                    "(no captions / not downloadable / already used). See the log "
+                    "for per-episode reasons."
                 )
 
             # Find ALL good moments: one OpenAI call per run, heuristic fallback.
