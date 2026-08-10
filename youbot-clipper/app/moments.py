@@ -15,7 +15,8 @@ from typing import List, Optional, Tuple
 
 import yt_dlp
 
-MIN_SPAN = 20.0  # seconds (user requirement: 20s minimum)
+MIN_SPAN = 30.0  # seconds (minimum clip length)
+MAX_SPAN = 60.0  # seconds (maximum clip length)
 
 # Preferred caption languages (English variants + auto).
 _SUB_LANGS = ["en", "en-US", "en-GB", "en-orig"]
@@ -278,7 +279,7 @@ def _candidate_windows(segments: List[Segment], clip_seconds: int) -> List[Momen
     if total < MIN_SPAN:
         return candidates
 
-    target = max(MIN_SPAN, min(float(clip_seconds), 40.0))
+    target = max(MIN_SPAN, min(float(clip_seconds), MAX_SPAN))
     for i, seg in enumerate(segments):
         start = seg.start
         hard_end = start + target
@@ -296,8 +297,8 @@ def _candidate_windows(segments: List[Segment], clip_seconds: int) -> List[Momen
         if span < MIN_SPAN:
             end = min(start + MIN_SPAN, total)
             span = end - start
-        if span > 40.0:
-            end = start + 40.0
+        if span > MAX_SPAN:
+            end = start + MAX_SPAN
         if end - start < MIN_SPAN:
             continue
 

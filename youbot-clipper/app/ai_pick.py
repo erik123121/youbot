@@ -19,7 +19,7 @@ from .moments import MIN_SPAN, Moment, Segment
 
 _ENDPOINT = "https://api.openai.com/v1/chat/completions"
 _TIMEOUT = 45
-_MAX_SPAN = 40.0
+_MAX_SPAN = 60.0
 _MAX_TRANSCRIPT_CHARS = 12000  # keep the request small/cheap
 
 
@@ -50,7 +50,7 @@ def _build_transcript(segments: List[Segment], max_chars: int = _MAX_TRANSCRIPT_
 
 
 def _prompt(transcript: str, duration: float, clip_seconds: int, max_count: int) -> str:
-    hi = min(_MAX_SPAN, float(clip_seconds))
+    hi = _MAX_SPAN  # fixed 30-60s range, independent of the clip_seconds config
     return (
         "Below is a timestamped transcript of a video; each line starts with its "
         "start time in seconds in square brackets.\n\n"
