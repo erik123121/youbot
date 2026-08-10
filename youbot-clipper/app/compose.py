@@ -79,33 +79,40 @@ def render(
     out_path: Path,
     clip_start: float,
     clip_duration: float,
+    speed: float = 1.0,
 ) -> Path:
     top_h = _even(int(OUT_H * TOP_FRACTION))
     bottom_h = _even(OUT_H - top_h)
 
-    gp_start = random_gameplay_start(gameplay_path, clip_duration)
+    # Speed only affects the top clip; the output ends up clip_duration/speed long.
+    speed = max(0.5, min(2.0, float(speed)))
+    out_dur = clip_duration / speed
+
+    gp_start = random_gameplay_start(gameplay_path, out_dur)
     has_audio = probe_has_audio(source_path)
 
     # Normalize both branches to a common CFR and reset PTS to 0 before stacking.
     # Without fps normalization + setpts, stacking two seeked inputs produces
     # broken timestamps (a file that won't play) and a bloated, slow encode.
     # Both halves scale-to-cover their region and center-crop (no black bars).
+    # The top's setpts divides by `speed` to speed the clip up; gameplay is not sped.
     filtergraph = (
         f"[0:v]scale={OUT_W}:{top_h}:force_original_aspect_ratio=increase,"
         f"crop={OUT_W}:{top_h}:(iw-{OUT_W})/2:(ih-{top_h})/2,"
-        f"setsar=1,fps={FPS},setpts=PTS-STARTPTS[top];"
+        f"setsar=1,fps={FPS},setpts=(PTS-STARTPTS)/{speed}[top];"
         f"[1:v]scale={OUT_W}:{bottom_h}:force_original_aspect_ratio=increase,"
         f"crop={OUT_W}:{bottom_h}:(iw-{OUT_W})/2:(ih-{bottom_h})/2,"
         f"setsar=1,fps={FPS},setpts=PTS-STARTPTS[bot];"
         f"[top][bot]vstack=inputs=2,format=yuv420p[v]"
     )
     if has_audio:
-        filtergraph += ";[0:a]aresample=async=1,asetpts=PTS-STARTPTS[a]"
+        # atempo speeds audio while preserving pitch.
+        filtergraph += f";[0:a]atempo={speed},aresample=async=1,asetpts=PTS-STARTPTS[a]"
 
     cmd = [
         "ffmpeg", "-y",
         "-ss", f"{clip_start}", "-t", f"{clip_duration}", "-i", str(source_path),
-        "-ss", f"{gp_start}", "-t", f"{clip_duration}", "-i", str(gameplay_path),
+        "-ss", f"{gp_start}", "-t", f"{out_dur}", "-i", str(gameplay_path),
         "-filter_complex", filtergraph,
         "-map", "[v]",
     ]
@@ -114,7 +121,7 @@ def render(
     else:
         cmd += ["-an"]
     cmd += [
-        "-t", f"{clip_duration}",
+        "-t", f"{out_dur}",
         "-r", str(FPS),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
         "-profile:v", "high", "-level", "4.2",

@@ -102,10 +102,13 @@ class Autopilot:
         while time.time() < end and self.enabled:
             time.sleep(min(20.0, end - time.time()))
 
+    # ~2-3 uploads/day. Hardcoded (not the config delay fields) so a stale saved
+    # value can't change the cadence — 24h/12h = 2/day, 24h/8h = 3/day.
+    _MIN_HOURS = 8.0
+    _MAX_HOURS = 12.0
+
     def _delay_seconds(self) -> float:
-        lo = min(self.s.upload_min_hours, self.s.upload_max_hours)
-        hi = max(self.s.upload_min_hours, self.s.upload_max_hours)
-        return random.uniform(lo, hi) * 3600.0
+        return random.uniform(self._MIN_HOURS, self._MAX_HOURS) * 3600.0
 
     def _generate(self) -> None:
         self.generating = True
