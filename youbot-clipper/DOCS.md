@@ -59,26 +59,26 @@ restart. Press **Stop Autopilot** to pause.
 quota is hit, autopilot waits for the daily reset — so throughput tops out around
 6 Shorts/day regardless of the delay setting.
 
-### One-time YouTube setup
+### One-time YouTube setup (Device Flow — no Playground)
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create/select a
    project and **enable the "YouTube Data API v3"** (APIs & Services → Library).
 2. **OAuth consent screen**: choose *External*, fill the basics, add the
    `.../auth/youtube.upload` scope, and set the publishing status to **In
-   production** (Testing mode expires refresh tokens after 7 days).
-3. **Credentials → Create credentials → OAuth client ID → Web application.**
-   Add the authorized redirect URI `https://developers.google.com/oauthplayground`.
-   Copy the **Client ID** and **Client secret**.
-4. Get a refresh token with the
-   [OAuth Playground](https://developers.google.com/oauthplayground): click the
-   gear (top-right) → check *Use your own OAuth credentials* → paste your client
-   ID/secret. In Step 1 enter the scope
-   `https://www.googleapis.com/auth/youtube.upload` → **Authorize APIs**, sign in
-   with the channel's Google account and allow. In Step 2 click **Exchange
-   authorization code for tokens** and copy the **refresh token**.
-5. Paste the client ID, client secret, and refresh token into the add-on's
-   config, set `upload_privacy`, **Save**, and **Restart**. Then press **Start
-   Autopilot**.
+   production** (Testing mode expires the token after 7 days).
+3. **Credentials → Create credentials → OAuth client ID → application type
+   "TVs and Limited Input devices".** No redirect URIs needed. Copy the
+   **Client ID** and **Client secret**.
+4. Paste the Client ID and Client secret into the add-on config
+   (`youtube_client_id`, `youtube_client_secret`), set `upload_privacy`, **Save**,
+   and **Restart**.
+5. In the add-on UI click **Connect YouTube**. It shows a short code and a link
+   (`google.com/device`) — open the link on any device, sign in with your
+   channel's Google account, enter the code, and allow. The refresh token is
+   stored automatically. Then press **Start Autopilot**.
+
+(The `youtube_refresh_token` config option still works as a manual fallback, but
+the Connect button is the easy path.)
 | `auto_update_addon` | `true` | On each start, pull the latest app code from the repo's `main` branch and run that. Lets you apply code fixes by just **Restarting** the add-on instead of using HA's Update button. |
 | `auto_update_ytdlp` | `true` | On each start, upgrade yt-dlp to the latest release (YouTube frequently breaks older versions). |
 

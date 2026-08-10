@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from . import pipeline, uploader
+from . import pipeline, uploader, ytauth
 from .config import Settings
 
 
@@ -136,7 +136,7 @@ class Autopilot:
 
         vid, err = uploader.upload_short(
             self.s.youtube_client_id, self.s.youtube_client_secret,
-            self.s.youtube_refresh_token, path, clip.get("title", "Short"),
+            ytauth.stored_refresh_token(self.s), path, clip.get("title", "Short"),
             clip.get("description", ""), self.s.upload_privacy,
         )
         if vid:

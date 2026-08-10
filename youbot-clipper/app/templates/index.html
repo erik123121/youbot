@@ -112,6 +112,15 @@
         <button id="apToggle" class="start-btn" style="padding:8px 16px;font-size:13px">Start Autopilot</button>
       </div>
       <div id="apDetail" class="status-msg" style="color:var(--muted);margin-top:8px;font-size:13px"></div>
+      <div id="ytRow" style="margin-top:10px;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span id="ytState"></span>
+        <a id="ytConnect" style="color:var(--accent2);cursor:pointer"></a>
+      </div>
+      <div id="ytPending" style="display:none;margin-top:8px;background:var(--panel2);border-radius:8px;padding:10px 12px;font-size:13px">
+        Go to <a id="ytUrl" target="_blank" rel="noopener" style="color:var(--accent2)"></a>
+        and enter code <strong id="ytCode" style="letter-spacing:2px"></strong>
+        <div style="color:var(--muted);margin-top:4px">Waiting for you to authorize…</div>
+      </div>
     </div>
 
     <p class="section-title">Gallery</p>
@@ -266,12 +275,44 @@
       refreshAutopilot();
     });
 
+    async function refreshYouTube() {
+      try {
+        const res = await fetch("api/youtube/status");
+        const y = await res.json();
+        $("ytState").textContent = y.connected ? "YouTube: connected ✓" : "YouTube: not connected";
+        $("ytConnect").textContent = y.connected ? "disconnect" : "Connect YouTube";
+        $("ytConnect").dataset.connected = y.connected ? "1" : "0";
+        if (y.pending) {
+          $("ytPending").style.display = "block";
+          $("ytUrl").textContent = y.pending.verification_url;
+          $("ytUrl").href = y.pending.verification_url;
+          $("ytCode").textContent = y.pending.user_code;
+        } else {
+          $("ytPending").style.display = "none";
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    $("ytConnect").addEventListener("click", async () => {
+      if ($("ytConnect").dataset.connected === "1") {
+        if (!confirm("Disconnect YouTube?")) return;
+        await fetch("api/youtube/disconnect", { method: "POST" });
+      } else {
+        const r = await fetch("api/youtube/connect", { method: "POST" });
+        const d = await r.json();
+        if (!d.ok) alert(d.message || "Could not start YouTube connect.");
+      }
+      refreshYouTube();
+    });
+
     setInterval(refreshAutopilot, 5000);
+    setInterval(refreshYouTube, 4000);
 
     pollStatus();
     refreshClips();
     refreshBlacklist();
     refreshAutopilot();
+    refreshYouTube();
   </script>
 </body>
 </html>

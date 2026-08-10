@@ -18,10 +18,12 @@ from . import blacklist, storage
 from .autopilot import Autopilot
 from .config import load_settings
 from .pipeline import Pipeline
+from .ytauth import YouTubeAuth
 
 settings = load_settings()
 pipeline = Pipeline(settings)
 autopilot = Autopilot(settings)
+ytauth = YouTubeAuth(settings)
 
 app = FastAPI(title="Youbot Shorts Clipper")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -87,9 +89,9 @@ def autopilot_status():
 
 @app.post("/api/autopilot/start")
 def autopilot_start():
-    if not settings.youtube_refresh_token:
+    if not ytauth.is_connected():
         return JSONResponse(
-            {"ok": False, "message": "YouTube not configured yet (see DOCS)."},
+            {"ok": False, "message": "Connect YouTube first."},
             status_code=400,
         )
     autopilot.start()
@@ -99,6 +101,23 @@ def autopilot_start():
 @app.post("/api/autopilot/stop")
 def autopilot_stop():
     autopilot.stop()
+    return {"ok": True}
+
+
+@app.get("/api/youtube/status")
+def youtube_status():
+    return ytauth.status()
+
+
+@app.post("/api/youtube/connect")
+def youtube_connect():
+    ok, msg = ytauth.start()
+    return JSONResponse({"ok": ok, "message": msg}, status_code=200 if ok else 400)
+
+
+@app.post("/api/youtube/disconnect")
+def youtube_disconnect():
+    ytauth.disconnect()
     return {"ok": True}
 
 
