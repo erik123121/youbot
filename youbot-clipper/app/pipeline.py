@@ -25,20 +25,11 @@ MAX_SCAN_ATTEMPTS = 40  # episodes to inspect before giving up in one run
 # every real episode.
 MAX_EPISODE_SECONDS = 6 * 3600
 
-# Per-channel playback speed for the top clip, matched on a substring of the
-# channel/uploader name (case-insensitive). 1.0 = normal.
-CHANNEL_SPEED = {"rogan": 1.2, "powerfuljre": 1.2, "jre": 1.2}
+# Playback speed applied to the top clip for every episode (1.0 = normal).
+CLIP_SPEED = 1.3
 
 # One generation at a time across manual + autopilot.
 _GEN_LOCK = threading.Lock()
-
-
-def _channel_speed(channel: str) -> float:
-    low = (channel or "").lower()
-    for key, spd in CHANNEL_SPEED.items():
-        if key in low:
-            return spd
-    return 1.0
 
 
 @dataclass
@@ -169,9 +160,9 @@ def generate_batch(s: Settings, st: JobState) -> List[dict]:
             raise RuntimeError("Could not find any good moments in the transcript.")
         st.set("scanning", f"Found {len(picked)} moment(s) to clip.")
 
-        speed = _channel_speed(vinfo.channel)
+        speed = CLIP_SPEED
         if speed != 1.0:
-            st.log.append(f"  speeding clips {speed}x for {vinfo.channel}.")
+            st.log.append(f"  speeding clips {speed}x.")
         made: List[dict] = []
         total = len(picked)
         for n, moment in enumerate(picked, start=1):
